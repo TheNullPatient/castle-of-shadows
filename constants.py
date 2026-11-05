@@ -1,0 +1,68 @@
+"""Размеры консоли, цвета и константы игры."""
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+ASSET_DIR = ROOT / "assets"
+TTF_PATH = ASSET_DIR / "DejaVuSansMono.ttf"
+TILESET_PATH = ASSET_DIR / "dejavu16x16_gs_tc.png"
+
+# Размер одной клетки TTF-шрифта. 12x20 близок к пропорциям DejaVu Sans Mono:
+# буквы не «разъезжаются», а окно остаётся компактным (~840x660).
+TILE_W = 12
+TILE_H = 20
+
+MAP_W, MAP_H = 70, 22
+STATUS_H = 1
+LOG_H = 9
+HINT_H = 1
+SCREEN_W = MAP_W
+SCREEN_H = MAP_H + STATUS_H + LOG_H + HINT_H
+STATUS_Y = MAP_H
+LOG_Y = MAP_H + STATUS_H
+HINT_Y = SCREEN_H - 1
+
+FOV_RADIUS = 8
+MAX_DEPTH = 10
+INVENTORY_CAPACITY = 20
+FIRE_RADIUS = 3
+FIRE_DAMAGE = 12
+AGGRO_RANGE = 7
+LOG_HISTORY = 200
+
+# RGB
+COLOR_WALL = (135, 135, 155)
+COLOR_FLOOR = (92, 92, 108)
+COLOR_WALL_DARK = (38, 38, 62)
+COLOR_FLOOR_DARK = (22, 22, 40)
+COLOR_PLAYER = (255, 255, 90)
+COLOR_ENEMY = (220, 70, 70)
+COLOR_ITEM = (210, 90, 210)
+COLOR_GOLD = (245, 205, 60)
+COLOR_STAIRS = (80, 225, 120)
+COLOR_HP = (90, 225, 220)
+COLOR_HP_OK = (90, 225, 130)
+COLOR_HP_MID = (245, 205, 80)
+COLOR_HP_LOW = (245, 80, 80)
+COLOR_XP = (150, 125, 245)
+COLOR_MSG = (220, 220, 220)
+COLOR_WARN = (255, 145, 80)
+COLOR_GOOD = (120, 230, 140)
+COLOR_DIM = (90, 90, 130)
+COLOR_UI = (185, 185, 210)
+COLOR_BG = (0, 0, 0)
+COLOR_PANEL = (12, 12, 22)
+COLOR_PANEL_LIGHT = (20, 20, 34)
+COLOR_POTION = (255, 105, 120)
+COLOR_WEAPON = (205, 212, 230)
+COLOR_ARMOR = (110, 170, 255)
+COLOR_SCROLL = (225, 195, 140)
+COLOR_ENEMY_RAT = (165, 135, 100)
+COLOR_ENEMY_GOBLIN = (120, 205, 95)
+COLOR_ENEMY_ORC = (230, 135, 60)
+COLOR_ENEMY_TROLL = (175, 105, 220)
+COLOR_ENEMY_DRAGON = (255, 70, 60)
+
+MODE_PLAYING = "playing"
+MODE_INVENTORY = "inventory"
+MODE_HELP = "help"
+MODE_DEAD = "dead"
