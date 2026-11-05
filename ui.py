@@ -172,6 +172,9 @@ def _render_status(console: tcod.console.Console, game: Game) -> None:
 
     bar_width = 10
     filled = max(0, min(bar_width, round(ratio * bar_width)))
+    console.draw_rect(
+        0, STATUS_Y, SCREEN_W, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL_LIGHT
+    )
     segments = [
         (" HP ", COLOR_DIM),
         (f"{player.hp:>3}/{player.max_hp:<3}", hp_color),
@@ -214,6 +217,7 @@ def _render_log(console: tcod.console.Console, game: Game) -> None:
 
 
 def _render_hint(console: tcod.console.Console) -> None:
+    console.draw_rect(0, HINT_Y, SCREEN_W, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL)
     segments = [
         (" WASD", COLOR_UI),
         (" · ", COLOR_DIM),
