@@ -17,8 +17,12 @@ from constants import (
     COLOR_ITEM,
     COLOR_MSG,
     COLOR_WARN,
+    DESCEND_HEAL_MIN,
+    DESCEND_HEAL_RATIO,
     ENEMY_RANGED_RANGE,
     FOV_RADIUS,
+    LEVEL_UP_HEAL_MIN,
+    LEVEL_UP_HEAL_RATIO,
     LOG_H,
     LOG_HISTORY,
     MAP_H,
@@ -32,6 +36,9 @@ from constants import (
     MODE_TRASH,
     POISON_DAMAGE,
     POISON_TURNS,
+    REGEN_AMOUNT,
+    REGEN_TURNS_DANGER,
+    REGEN_TURNS_SAFE,
     SUMMON_COOLDOWN,
     TRASH_CAPACITY,
     TRASH_CHAR,
@@ -108,6 +115,7 @@ class Game:
         self.killed_by = ""
         self.poison_turns = 0
         self.poison_damage = POISON_DAMAGE
+        self.regen_counter = 0
         self.enemies: list[Entity] = []
         self.items: list[Item] = []
         self.trash_pos: tuple[int, int] | None = None
@@ -144,7 +152,17 @@ class Game:
             self.player.x, self.player.y = px, py
             if not first:
                 self.player.max_hp += 5
-                self.player.hp = self.player.max_hp
+                heal = max(
+                    DESCEND_HEAL_MIN,
+                    int(self.player.max_hp * DESCEND_HEAL_RATIO),
+                )
+                healed = self._heal_player(heal)
+                if healed:
+                    self.msg(
+                        f"You bind your wounds (+{healed} HP).",
+                        "heal",
+                    )
+        self.regen_counter = 0
 
         rl = self.dungeon.rooms[-1]
         self.stairs = (rl[0] + rl[2] // 2, rl[1] + rl[3] // 2)
@@ -391,17 +409,54 @@ class Game:
                 "warn",
             )
 
+    def _heal_player(self, amount: int) -> int:
+        """Восстановить не больше ``amount`` HP и вернуть фактическое лечение."""
+        if amount <= 0 or self.game_over:
+            return 0
+        before = self.player.hp
+        self.player.hp = min(self.player.max_hp, self.player.hp + amount)
+        return self.player.hp - before
+
+    def _regen_tick(self) -> None:
+        """Естественная регенерация: медленно в бою, быстрее на безопасном этаже."""
+        if (
+            self.game_over
+            or self.player.hp >= self.player.max_hp
+            or self.poison_turns > 0
+        ):
+            self.regen_counter = 0
+            return
+
+        threat = any(
+            abs(e.x - self.player.x) + abs(e.y - self.player.y)
+            <= AGGRO_RANGE
+            for e in self.enemies
+        )
+        interval = REGEN_TURNS_DANGER if threat else REGEN_TURNS_SAFE
+        self.regen_counter += 1
+        if self.regen_counter >= interval:
+            self.regen_counter = 0
+            self._heal_player(REGEN_AMOUNT)
+
     def _check_level_up(self) -> None:
         while self.player_xp >= self.xp_next:
             self.player_xp -= self.xp_next
             self.xp_next = int(self.xp_next * 1.5)
             self.player_level += 1
             self.player.max_hp += 5
-            self.player.hp = self.player.max_hp
+            heal = max(
+                LEVEL_UP_HEAL_MIN,
+                int(self.player.max_hp * LEVEL_UP_HEAL_RATIO),
+            )
+            healed = self._heal_player(heal)
             self.player.atk += 1
             if self.player_level % 2 == 0:
                 self.player.df += 1
-            self.msg(f"*** Level up! LV {self.player_level} ***", "good")
+            self.msg(
+                f"*** Level up! LV {self.player_level} "
+                f"(+{healed} HP) ***",
+                "good",
+            )
 
     def player_acted(self) -> None:
         if self.game_over:
@@ -410,6 +465,8 @@ class Game:
         self.enemy_turn()
         if not self.game_over:
             self._poison_tick()
+        if not self.game_over:
+            self._regen_tick()
         if not self.game_over:
             self.update_fov()
 

@@ -56,6 +56,7 @@ HELP_ROWS = [
     ("Quit", "Q"),
     ("Restart", "R (on the death screen)"),
     ("", ""),
+    ("Health", "slow regen; floors/levels heal partly"),
     ("Potions", "heal, antidote, strength, iron skin"),
     ("Scrolls", "teleport, mapping, fire, healing, lightning"),
     ("Gear", "weapons/armor lose durability when used"),
