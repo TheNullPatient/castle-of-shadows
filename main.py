@@ -191,7 +191,7 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
     if sym == KeySym.I:
         game.toggle_inventory()
         return False
-    if sym == KeySym.X:
+    if sym == KeySym.TAB:
         game.open_trash()
         return False
     if sym in MOVE_KEYS:
@@ -232,6 +232,9 @@ def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
         else:
             game.mode = "playing"
         return False
+    if sym == KeySym.TAB:
+        game.open_trash()
+        return False
     if game.discard_mode:
         letter = _letter(event)
         if letter:
@@ -258,7 +261,7 @@ def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
 
 def _handle_trash(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
-    if sym in (KeySym.ESCAPE, KeySym.X):
+    if sym in (KeySym.ESCAPE, KeySym.TAB):
         game.mode = "playing"
         return False
     letter = _letter(event)

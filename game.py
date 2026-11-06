@@ -321,7 +321,7 @@ class Game:
         if (nx, ny) == self.trash_pos:
             self.msg(
                 f"There is a trash bin here "
-                f"({len(self.trash_items)}/{TRASH_CAPACITY}). Press x to look inside."
+                f"({len(self.trash_items)}/{TRASH_CAPACITY}). Press Tab to look inside."
             )
         self.player_acted()
 

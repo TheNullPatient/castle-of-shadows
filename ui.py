@@ -49,7 +49,7 @@ HELP_ROWS = [
     ("Pick up", "walk over an item (gold auto)"),
     ("Inventory", "i, then a-z to use / equip"),
     ("Throw away", "in inventory: Del, then a-z (at the bin)"),
-    ("Trash", "stand on '%' and press x"),
+    ("Trash", "stand on '%' and press Tab"),
     ("Descend", "stand on '>' and press > or Enter"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),
@@ -323,7 +323,7 @@ def _render_inventory(console: tcod.console.Console, game: Game) -> None:
     if game.discard_mode:
         hint = "Throw away: choose a slot a-z   ESC cancel"
     elif game.on_trash():
-        hint = "a-z use/equip   Del throw away   x look in trash   ESC close"
+        hint = "a-z use/equip   Del throw away   Tab look in trash   ESC close"
     else:
         hint = "a-z use/equip   Del throw away (stand on %)   ESC close"
     console.print(
