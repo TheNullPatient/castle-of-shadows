@@ -11,6 +11,7 @@ from tcod.event import KeySym
 
 from constants import (
     LOG_H,
+    MODE_MENU,
     SCREEN_H,
     SCREEN_W,
     TILE_H,
@@ -165,13 +166,15 @@ def _letter(event: tcod.event.KeyDown) -> str | None:
 
 def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
     """Обработать клавишу. True — закрыть окно."""
+    if game.mode == MODE_MENU:
+        return _handle_menu(game, event)
     if game.mode == "dead":
         if event.sym == KeySym.R:
             game.restart()
             return False
         return True
     if game.mode == "help":
-        game.mode = "playing"
+        game.close_help()
         return False
     if game.mode == "inventory":
         return _handle_inventory(game, event)
@@ -221,6 +224,32 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
     if sym in (KeySym.EQUALS, KeySym.KP_PLUS, KeySym.PLUS):
         game.log.scroll(-1)
         return False
+    return False
+
+
+def _handle_menu(game: Game, event: tcod.event.KeyDown) -> bool:
+    sym = event.sym
+    count = len(Game.MENU_OPTIONS)
+    if sym in (KeySym.UP, KeySym.W, KeySym.K):
+        game.menu_index = (game.menu_index - 1) % count
+        return False
+    if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+        game.menu_index = (game.menu_index + 1) % count
+        return False
+    if sym in (KeySym.QUESTION, KeySym.F1):
+        game.toggle_help()
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        choice = Game.MENU_OPTIONS[game.menu_index]
+        if choice == "New Game":
+            game.restart()
+        elif choice == "How to Play":
+            game.toggle_help()
+        else:
+            return True
+        return False
+    if sym in (KeySym.Q, KeySym.ESCAPE):
+        return True
     return False
 
 

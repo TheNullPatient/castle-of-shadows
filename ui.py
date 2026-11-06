@@ -34,6 +34,7 @@ from constants import (
     MAP_H,
     MAP_W,
     MAX_DEPTH,
+    MODE_MENU,
     SCREEN_H,
     SCREEN_W,
     STATUS_Y,
@@ -93,6 +94,9 @@ def _warm_glow(game: Game, x: int, y: int) -> tuple[int, int, int]:
 
 def render(console: tcod.console.Console, game: Game) -> None:
     console.clear()
+    if game.mode == MODE_MENU:
+        _render_menu(console, game)
+        return
     if game.mode == "help":
         _render_help(console)
         return
@@ -394,6 +398,51 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
         "a-h take   ESC close"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
+    )
+
+
+def _render_menu(console: tcod.console.Console, game: Game) -> None:
+    console.clear(fg=COLOR_UI, bg=COLOR_BG)
+    width = min(SCREEN_W - 8, 54)
+    height = 15
+    x0 = (SCREEN_W - width) // 2
+    y0 = max(2, (SCREEN_H - height) // 2)
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=" CASTLE OF SHADOWS ",
+        fg=COLOR_GOLD,
+        bg=COLOR_BG,
+        clear=True,
+    )
+    subtitle = "A roguelike descent into darkness"
+    console.print(
+        x0 + max(0, (width - len(subtitle)) // 2),
+        y0 + 2,
+        subtitle,
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
+    )
+    start_y = y0 + 5
+    for i, label in enumerate(Game.MENU_OPTIONS):
+        selected = i == game.menu_index
+        text = f"{'>' if selected else ' '} {label}"
+        console.print(
+            x0 + max(0, (width - len(text)) // 2),
+            start_y + i * 2,
+            text,
+            fg=COLOR_GOLD if selected else COLOR_UI,
+            bg=COLOR_BG,
+        )
+    hint = "W/S or arrows · Enter select · Q quit"
+    console.print(
+        x0 + max(0, (width - len(hint)) // 2),
+        y0 + height - 2,
+        hint,
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
     )
 
 

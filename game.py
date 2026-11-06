@@ -32,6 +32,7 @@ from constants import (
     MODE_DEAD,
     MODE_HELP,
     MODE_INVENTORY,
+    MODE_MENU,
     MODE_PLAYING,
     MODE_TRASH,
     POISON_DAMAGE,
@@ -96,8 +97,12 @@ class MessageLog:
 
 
 class Game:
+    MENU_OPTIONS = ("New Game", "How to Play", "Quit")
+
     def __init__(self) -> None:
-        self.mode = MODE_PLAYING
+        self.mode = MODE_MENU
+        self.menu_index = 0
+        self.help_return_mode = MODE_MENU
         self.depth = 1
         self.log = MessageLog()
         self.player: Entity | None = None
@@ -795,7 +800,15 @@ class Game:
         self.mode = MODE_DEAD
 
     def toggle_help(self) -> None:
-        self.mode = MODE_PLAYING if self.mode == MODE_HELP else MODE_HELP
+        if self.mode == MODE_HELP:
+            self.close_help()
+            return
+        self.help_return_mode = self.mode
+        self.mode = MODE_HELP
+
+    def close_help(self) -> None:
+        if self.mode == MODE_HELP:
+            self.mode = self.help_return_mode
 
     def toggle_inventory(self) -> None:
         if self.mode == MODE_INVENTORY:
@@ -808,3 +821,4 @@ class Game:
     def restart(self) -> None:
         """Начать новую игру, сохранив тот же объект Game для главного цикла."""
         self.__init__()
+        self.mode = MODE_PLAYING
