@@ -282,7 +282,34 @@ class Game:
             light_walls=True,
             algorithm=FOV_SYMMETRIC_SHADOWCAST,
         )
+        self._light_wall_edges()
         self.explored |= self.visible
+
+    def _light_wall_edges(self) -> None:
+        """Подсветить стены, примыкающие к видимому полу.
+
+        На краю радиуса стена может оказаться на клетку дальше последнего
+        видимого пола. Без этого граница комнаты или коридора выглядит так,
+        будто игрок её не видит.
+        """
+        neighbors = (
+            (-1, -1), (0, -1), (1, -1),
+            (-1, 0), (1, 0),
+            (-1, 1), (0, 1), (1, 1),
+        )
+        visible_floors = [
+            (x, y)
+            for y in range(MAP_H)
+            for x in range(MAP_W)
+            if self.visible[x, y] and self.dungeon.grid[y][x] != "#"
+        ]
+        for x, y in visible_floors:
+            for dx, dy in neighbors:
+                nx, ny = x + dx, y + dy
+                if not self.dungeon.in_bounds(nx, ny):
+                    continue
+                if self.dungeon.grid[ny][nx] == "#":
+                    self.visible[nx, ny] = True
 
     def attack(self, attacker: Entity, defender: Entity) -> None:
         if attacker is self.player:

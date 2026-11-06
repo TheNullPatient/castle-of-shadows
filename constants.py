@@ -21,7 +21,7 @@ STATUS_Y = MAP_H
 LOG_Y = MAP_H + STATUS_H
 HINT_Y = SCREEN_H - 1
 
-FOV_RADIUS = 8
+FOV_RADIUS = 11  # радиус обзора; стены на краю подсвечиваются отдельно
 MAX_DEPTH = 10
 INVENTORY_CAPACITY = 26  # a-z
 FIRE_RADIUS = 3
