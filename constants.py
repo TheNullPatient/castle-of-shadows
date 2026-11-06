@@ -38,6 +38,8 @@ STACK_LIMITS = {
 # Мусорка в углу комнаты.
 TRASH_CHAR = "%"
 TRASH_CAPACITY = 8
+TRASH_LOOT_CHANCE = 0.5
+TRASH_LOOT_MAX = 3
 
 # RGB
 COLOR_WALL = (135, 135, 155)

@@ -99,6 +99,8 @@ class Inventory:
             extra = f" (+{item.value})"
         elif item.kind == "potion":
             extra = f" (+{item.value} HP)"
+        elif item.kind == "gold":
+            extra = f" ({item.value})"
         if item.max_durability > 0:
             extra += f" [{item.durability}/{item.max_durability}]"
         if item.quantity > 1:

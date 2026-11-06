@@ -49,7 +49,7 @@ HELP_ROWS = [
     ("Pick up", "walk over an item (gold auto)"),
     ("Inventory", "i, then a-z to use / equip"),
     ("Throw away", "in inventory: Del, then a-z (at the bin)"),
-    ("Trash", "stand on '%' and press Tab"),
+    ("Trash", "stand on '%' and press Tab (may hold loot)"),
     ("Descend", "stand on '>' and press > or Enter"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),

@@ -30,6 +30,8 @@ from constants import (
     MODE_TRASH,
     TRASH_CAPACITY,
     TRASH_CHAR,
+    TRASH_LOOT_CHANCE,
+    TRASH_LOOT_MAX,
 )
 from dungeon import Dungeon
 from entities import ENEMY_TYPES, Entity, Item, make_enemy, make_player, random_loot
@@ -139,6 +141,7 @@ class Game:
         self.trash_pos = self._place_trash()
         self._spawn_enemies()
         self._spawn_items()
+        self._spawn_trash_loot()
         self.explored = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.update_fov()
 
@@ -179,6 +182,22 @@ class Game:
             if pos is None:
                 continue
             self.items.append(random_loot(pos[0], pos[1], self.depth))
+
+    def _spawn_trash_loot(self) -> None:
+        """Иногда в мусорке уже лежит что-то полезное."""
+        if self.trash_pos is None or random.random() >= TRASH_LOOT_CHANCE:
+            return
+        count = random.randint(1, TRASH_LOOT_MAX)
+        for _ in range(count):
+            if len(self.trash_items) >= TRASH_CAPACITY:
+                break
+            self.trash_items.append(
+                random_loot(
+                    self.trash_pos[0],
+                    self.trash_pos[1],
+                    self.depth,
+                )
+            )
 
     def _free_spot(self) -> tuple[int, int] | None:
         rooms = self.dungeon.rooms[1:] or self.dungeon.rooms
@@ -391,6 +410,11 @@ class Game:
         if not (0 <= index < len(self.trash_items)):
             return False
         item = self.trash_items[index]
+        if item.kind == "gold":
+            self.gold += item.value
+            self.trash_items.pop(index)
+            self.msg(f"You find {item.value} gold in the trash.", "gold")
+            return True
         if not self.inventory.add(item):
             self.msg("Your pack is full.", "warn")
             return False
