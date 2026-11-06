@@ -186,36 +186,49 @@ def _render_status(console: tcod.console.Console, game: Game) -> None:
     if ratio <= 0.25 and game.turns % 2:
         hp_color = _tint(hp_color, 0.55)
 
-    bar_width = 10
-    filled = max(0, min(bar_width, round(ratio * bar_width)))
     console.draw_rect(
         0, STATUS_Y, SCREEN_W, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL_LIGHT
     )
-    segments = [
-        (" HP ", COLOR_DIM),
-        (f"{player.hp:>3}/{player.max_hp:<3}", hp_color),
-        ("█" * filled, hp_color),
-        ("░" * (bar_width - filled), COLOR_DIM),
-        ("  LV ", COLOR_DIM),
-        (str(game.player_level), COLOR_XP),
-        ("  XP ", COLOR_DIM),
-        (f"{game.player_xp}/{game.xp_next}", COLOR_XP),
-        ("  ATK ", COLOR_DIM),
-        (str(game.total_atk), COLOR_UI),
-        ("  DEF ", COLOR_DIM),
-        (str(game.total_df), COLOR_UI),
-        ("  $ ", COLOR_DIM),
-        (str(game.gold), COLOR_GOLD),
-        ("  DEP ", COLOR_DIM),
-        (f"{game.depth}/{MAX_DEPTH}", COLOR_STAIRS),
-    ]
-    if game.poison_turns > 0:
-        segments.extend(
-            [
-                ("  P", COLOR_WARN),
-                (str(game.poison_turns), COLOR_HP_LOW),
-            ]
-        )
+
+    def build_segments(bar_width: int) -> list[tuple[str, tuple[int, int, int]]]:
+        filled = max(0, min(bar_width, round(ratio * bar_width)))
+        result: list[tuple[str, tuple[int, int, int]]] = [
+            (" HP ", COLOR_DIM),
+            (f"{player.hp:>3}/{player.max_hp:<3}", hp_color),
+            ("█" * filled, hp_color),
+            ("░" * (bar_width - filled), COLOR_DIM),
+            (" LV ", COLOR_DIM),
+            (str(game.player_level), COLOR_XP),
+            (" XP ", COLOR_DIM),
+            (f"{game.player_xp}/{game.xp_next}", COLOR_XP),
+            (" ATK ", COLOR_DIM),
+            (str(game.total_atk), COLOR_UI),
+            (" DEF ", COLOR_DIM),
+            (str(game.total_df), COLOR_UI),
+            (" $ ", COLOR_DIM),
+            (str(game.gold), COLOR_GOLD),
+            (" DEP ", COLOR_DIM),
+            (f"{game.depth}/{MAX_DEPTH}", COLOR_STAIRS),
+        ]
+        if game.poison_turns > 0:
+            result.extend(
+                [
+                    (" P", COLOR_WARN),
+                    (str(game.poison_turns), COLOR_HP_LOW),
+                ]
+            )
+        return result
+
+    # Если строка не влезает (высокие HP/XP/золото), сначала ужимаем HP-бар,
+    # чтобы важные цифры вроде DEP никогда не обрезались.
+    bar_width = 10
+    segments = build_segments(bar_width)
+    while (
+        bar_width > 3
+        and sum(len(text) for text, _ in segments) > SCREEN_W
+    ):
+        bar_width -= 1
+        segments = build_segments(bar_width)
     _print_segments(console, 0, STATUS_Y, segments, COLOR_PANEL_LIGHT, SCREEN_W)
 
 
