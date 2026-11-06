@@ -98,7 +98,16 @@ class Inventory:
         elif item.kind == "armor":
             extra = f" (+{item.value})"
         elif item.kind == "potion":
-            extra = f" (+{item.value} HP)"
+            if item.effect == "health":
+                extra = f" (+{item.value} HP)"
+            elif item.effect == "antidote":
+                extra = " (cures poison)"
+            elif item.effect == "strength":
+                extra = f" (+{item.value} ATK)"
+            elif item.effect == "ironskin":
+                extra = f" (+{item.value} DEF)"
+            else:
+                extra = f" (+{item.value})"
         elif item.kind == "gold":
             extra = f" ({item.value})"
         if item.max_durability > 0:
@@ -135,10 +144,29 @@ class Inventory:
         return False
 
     def _use_potion(self, index: int, game: Game) -> bool:
+        item = self.items[index]
+        if item.effect == "antidote":
+            self.consume(index)
+            if game.cure_poison():
+                game.msg("The antidote purges the poison from your veins.", "heal")
+            else:
+                game.msg("You drink the antidote. You were not poisoned.", "heal")
+            return True
+        if item.effect == "strength":
+            self.consume(index)
+            game.player.atk += item.value
+            game.msg(f"You feel stronger! (+{item.value} ATK)", "good")
+            return True
+        if item.effect == "ironskin":
+            self.consume(index)
+            game.player.df += item.value
+            game.msg(f"Your skin hardens! (+{item.value} DEF)", "good")
+            return True
+
         if game.player.hp >= game.player.max_hp:
             game.msg("You are already at full health.", "warn")
             return False
-        item = self.consume(index)
+        self.consume(index)
         missing = game.player.max_hp - game.player.hp
         heal = min(item.value, missing)
         game.player.hp += heal
@@ -185,6 +213,22 @@ class Inventory:
                 game.msg(f"Fire erupts around you! ({hits} burned)", "warn")
             else:
                 game.msg("Flames roar, but nobody is in sight.", "warn")
+            return True
+        if effect == "healing":
+            missing = game.player.max_hp - game.player.hp
+            if missing <= 0:
+                game.msg("You are already at full health.", "warn")
+                return False
+            self.consume(index)
+            heal = min(item.value, missing)
+            game.player.hp += heal
+            game.msg(f"Soft light knits your wounds (+{heal} HP).", "heal")
+            return True
+        if effect == "lightning":
+            self.consume(index)
+            target = game.cast_lightning(item.value)
+            if not target:
+                game.msg("Thunder rolls, but no foe is in sight.", "warn")
             return True
         game.msg("The scroll is blank.")
         return False

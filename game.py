@@ -17,24 +17,37 @@ from constants import (
     COLOR_ITEM,
     COLOR_MSG,
     COLOR_WARN,
+    ENEMY_RANGED_RANGE,
     FOV_RADIUS,
     LOG_H,
     LOG_HISTORY,
     MAP_H,
     MAP_W,
     MAX_DEPTH,
+    MAX_ENEMIES,
     MODE_DEAD,
     MODE_HELP,
     MODE_INVENTORY,
     MODE_PLAYING,
     MODE_TRASH,
+    POISON_DAMAGE,
+    POISON_TURNS,
+    SUMMON_COOLDOWN,
     TRASH_CAPACITY,
     TRASH_CHAR,
     TRASH_LOOT_CHANCE,
     TRASH_LOOT_MAX,
 )
 from dungeon import Dungeon
-from entities import ENEMY_TYPES, Entity, Item, make_enemy, make_player, random_loot
+from entities import (
+    ENEMY_BY_NAME,
+    ENEMY_TYPES,
+    Entity,
+    Item,
+    make_enemy,
+    make_player,
+    random_loot,
+)
 from inventory import Inventory
 
 MSG_COLORS = {
@@ -93,6 +106,8 @@ class Game:
         self.kills = 0
         self.turns = 0
         self.killed_by = ""
+        self.poison_turns = 0
+        self.poison_damage = POISON_DAMAGE
         self.enemies: list[Entity] = []
         self.items: list[Item] = []
         self.trash_pos: tuple[int, int] | None = None
@@ -252,29 +267,103 @@ class Game:
         self.explored |= self.visible
 
     def attack(self, attacker: Entity, defender: Entity) -> None:
-        atk = self.total_atk if attacker is self.player else attacker.atk
-        df = self.total_df if defender is self.player else defender.df
-        dmg = max(1, atk - df + random.randint(-1, 2))
-        defender.hp -= dmg
         if attacker is self.player:
+            dmg = max(
+                1,
+                self.total_atk - defender.df + random.randint(-1, 2),
+            )
+            defender.hp -= dmg
             self.msg(f"You hit {defender.name} for {dmg}.")
             self._wear_equipment(self.inventory.weapon)
-        else:
-            self.msg(f"{attacker.name} hits you for {dmg}.", "enemy")
-            if defender is self.player:
-                self._wear_equipment(self.inventory.armor)
+            if not defender.alive():
+                self._kill_enemy(defender)
+            return
 
-        if not defender.alive():
-            if defender is self.player:
-                self.killed_by = attacker.name
-                self.msg("You died!", "enemy")
-                self.finish(win=False)
-            else:
-                self.msg(f"{defender.name} dies! (+{defender.xp} XP)")
-                self.enemies.remove(defender)
-                self.kills += 1
-                self.player_xp += defender.xp
-                self._check_level_up()
+        dmg = max(
+            1,
+            attacker.atk
+            - (self.total_df if defender is self.player else defender.df)
+            + random.randint(-1, 2),
+        )
+        if defender is self.player:
+            self.msg(f"{attacker.name} hits you for {dmg}.", "enemy")
+            self._hurt_player(dmg, attacker.name)
+        else:
+            defender.hp -= dmg
+            if not defender.alive():
+                self._kill_enemy(defender)
+
+    def _kill_enemy(self, enemy: Entity) -> None:
+        if enemy not in self.enemies:
+            return
+        self.enemies.remove(enemy)
+        self.kills += 1
+        self.player_xp += enemy.xp
+        self.msg(f"{enemy.name} dies! (+{enemy.xp} XP)")
+        self._check_level_up()
+
+    def _hurt_player(
+        self,
+        dmg: int,
+        source: str,
+        wear_armor: bool = True,
+    ) -> None:
+        if self.game_over:
+            return
+        self.player.hp -= dmg
+        if wear_armor:
+            self._wear_equipment(self.inventory.armor)
+        if self.player.hp <= 0:
+            self.player.hp = 0
+            self.killed_by = source
+            self.msg("You died!", "enemy")
+            self.finish(win=False)
+
+    def _apply_poison(self, enemy: Entity) -> None:
+        if self.game_over:
+            return
+        was_poisoned = self.poison_turns > 0
+        self.poison_turns = max(self.poison_turns, POISON_TURNS)
+        self.poison_damage = max(self.poison_damage, POISON_DAMAGE)
+        if was_poisoned:
+            self.msg(
+                f"{enemy.name}'s venom burns again "
+                f"({self.poison_turns} turns).",
+                "warn",
+            )
+        else:
+            self.msg(
+                f"You are poisoned by {enemy.name}! "
+                f"({self.poison_turns} turns)",
+                "warn",
+            )
+
+    def cure_poison(self) -> bool:
+        if self.poison_turns <= 0:
+            return False
+        self.poison_turns = 0
+        self.poison_damage = POISON_DAMAGE
+        return True
+
+    def _poison_tick(self) -> None:
+        if self.poison_turns <= 0 or self.game_over:
+            return
+        self.poison_turns -= 1
+        dmg = max(1, self.poison_damage)
+        self.player.hp -= dmg
+        if self.player.hp <= 0:
+            self.player.hp = 0
+            self.killed_by = "Poison"
+            self.msg("The poison overwhelms you!", "enemy")
+            self.finish(win=False)
+            return
+        if self.poison_turns <= 0:
+            self.msg(f"Poison deals {dmg}. You feel better.", "warn")
+        else:
+            self.msg(
+                f"Poison deals {dmg} ({self.poison_turns} turns left).",
+                "warn",
+            )
 
     def _wear_equipment(self, item: Item | None) -> None:
         """Износить оружие/броню на единицу и сломать при нуле."""
@@ -319,6 +408,8 @@ class Game:
             return
         self.turns += 1
         self.enemy_turn()
+        if not self.game_over:
+            self._poison_tick()
         if not self.game_over:
             self.update_fov()
 
@@ -454,12 +545,25 @@ class Game:
             hits += 1
             self.msg(f"Fire burns {e.name} for {damage}.", "warn")
             if not e.alive():
-                self.msg(f"{e.name} dies! (+{e.xp} XP)")
-                self.enemies.remove(e)
-                self.kills += 1
-                self.player_xp += e.xp
-                self._check_level_up()
+                self._kill_enemy(e)
         return hits
+
+    def cast_lightning(self, damage: int) -> str | None:
+        targets = [e for e in self.enemies if self.is_visible(e.x, e.y)]
+        if not targets:
+            return None
+        target = min(
+            targets,
+            key=lambda e: (
+                abs(e.x - self.player.x) + abs(e.y - self.player.y),
+                e.hp,
+            ),
+        )
+        target.hp -= damage
+        self.msg(f"Lightning strikes {target.name} for {damage}!", "warn")
+        if not target.alive():
+            self._kill_enemy(target)
+        return target.name
 
     def _path_cost(self) -> np.ndarray:
         cost = np.zeros((MAP_W, MAP_H), dtype=np.int8, order="F")
@@ -472,17 +576,106 @@ class Game:
         cost[self.player.x, self.player.y] = 1
         return cost
 
+    def _melee_enemy(self, enemy: Entity) -> None:
+        self.attack(enemy, self.player)
+        if self.game_over:
+            return
+        if enemy.behavior == "poison":
+            self._apply_poison(enemy)
+        if enemy.behavior == "fast" and not self.game_over:
+            self.attack(enemy, self.player)
+
+    def _ranged_attack(self, enemy: Entity) -> None:
+        dmg = max(
+            1,
+            enemy.atk - self.total_df + random.randint(-1, 2),
+        )
+        self.msg(f"{enemy.name} shoots you for {dmg}.", "enemy")
+        self._hurt_player(dmg, enemy.name)
+
+    def _summon(self, enemy: Entity) -> None:
+        if len(self.enemies) >= MAX_ENEMIES:
+            self.msg(
+                f"{enemy.name} chants, but the shadows are full.",
+                "warn",
+            )
+            return
+        pos = self._spot_near(enemy.x, enemy.y, 2)
+        if pos is None:
+            self.msg(f"{enemy.name} chants, but nothing answers.", "warn")
+            return
+        kind = ENEMY_BY_NAME[random.choice(("Rat", "Bat"))]
+        minion = make_enemy(kind, pos[0], pos[1], self.depth)
+        self.enemies.append(minion)
+        self.msg(f"{enemy.name} summons a {minion.name}!", "enemy")
+
+    def _spot_near(
+        self,
+        x: int,
+        y: int,
+        radius: int,
+    ) -> tuple[int, int] | None:
+        spots: list[tuple[int, int]] = []
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if not self.walkable(nx, ny):
+                    continue
+                if self._occupied(nx, ny):
+                    continue
+                if (nx, ny) in (self.stairs, self.trash_pos):
+                    continue
+                spots.append((nx, ny))
+        return random.choice(spots) if spots else None
+
     def enemy_turn(self) -> None:
         cost = self._path_cost()
         for e in self.enemies[:]:
             if self.game_over:
                 return
+            if not e.alive():
+                continue
+
+            if e.behavior == "slow":
+                # Голем действует через ход.
+                if e.cooldown > 0:
+                    e.cooldown -= 1
+                    continue
+                e.cooldown = 1
+            elif e.cooldown > 0:
+                e.cooldown -= 1
+
             dist = abs(self.player.x - e.x) + abs(self.player.y - e.y)
+
+            if (
+                e.behavior == "ranged"
+                and dist > 1
+                and dist <= ENEMY_RANGED_RANGE
+                and self.is_visible(e.x, e.y)
+            ):
+                if e.cooldown <= 0:
+                    self._ranged_attack(e)
+                    e.cooldown = 2
+                continue
+
+            if (
+                e.behavior == "summoner"
+                and dist <= AGGRO_RANGE
+                and self.is_visible(e.x, e.y)
+                and e.cooldown <= 0
+            ):
+                self._summon(e)
+                e.cooldown = SUMMON_COOLDOWN
+                continue
+
             if dist == 1:
-                self.attack(e, self.player)
+                self._melee_enemy(e)
                 continue
             if dist > AGGRO_RANGE:
                 continue
+
             cost[e.x, e.y] = 1
             graph = tcod.path.SimpleGraph(cost=cost, cardinal=1, diagonal=0)
             pf = tcod.path.Pathfinder(graph)
@@ -493,7 +686,7 @@ class Game:
                 continue
             nx, ny = int(path[1][0]), int(path[1][1])
             if (nx, ny) == (self.player.x, self.player.y):
-                self.attack(e, self.player)
+                self._melee_enemy(e)
                 continue
             if self.walkable(nx, ny) and not self.enemy_at(nx, ny):
                 e.x, e.y = nx, ny

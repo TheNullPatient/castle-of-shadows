@@ -56,9 +56,12 @@ HELP_ROWS = [
     ("Quit", "Q"),
     ("Restart", "R (on the death screen)"),
     ("", ""),
-    ("Potions", "heal, stack up to 8"),
-    ("Scrolls", "teleport, mapping, fire; stack up to 4"),
+    ("Potions", "heal, antidote, strength, iron skin"),
+    ("Scrolls", "teleport, mapping, fire, healing, lightning"),
     ("Gear", "weapons/armor lose durability when used"),
+    ("Poison", "P<n> in status; antidote cures it"),
+    ("Foes", "bats strike twice, skeletons shoot arrows"),
+    ("", "spiders poison, cultists summon minions"),
     ("Goal", "descend 10 floors and escape"),
     ("", ""),
     ("", "Press any key to return..."),
@@ -206,6 +209,13 @@ def _render_status(console: tcod.console.Console, game: Game) -> None:
         ("  DEP ", COLOR_DIM),
         (f"{game.depth}/{MAX_DEPTH}", COLOR_STAIRS),
     ]
+    if game.poison_turns > 0:
+        segments.extend(
+            [
+                ("  P", COLOR_WARN),
+                (str(game.poison_turns), COLOR_HP_LOW),
+            ]
+        )
     _print_segments(console, 0, STATUS_Y, segments, COLOR_PANEL_LIGHT, SCREEN_W)
 
 
