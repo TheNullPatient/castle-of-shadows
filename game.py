@@ -125,6 +125,7 @@ class Game:
         self.items: list[Item] = []
         self.trash_pos: tuple[int, int] | None = None
         self.trash_items: list[Item] = []
+        self.trash_noticed = False
         self.discard_mode = False
         self.visible = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.explored = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
@@ -176,6 +177,7 @@ class Game:
         self.enemies = []
         self.items = []
         self.trash_items = []
+        self.trash_noticed = False
         self.trash_pos = self._place_trash()
         self._spawn_enemies()
         self._spawn_items()
@@ -184,23 +186,40 @@ class Game:
         self.update_fov()
 
     def _place_trash(self) -> tuple[int, int] | None:
-        """Поставить мусорку в угол случайной комнаты."""
-        corners: list[tuple[int, int]] = []
+        """Поставить мусорку в закрытый угол случайной комнаты.
+
+        Закрытым считается угол, у которого обе внешние ортогональные
+        клетки и внешняя диагональ — стены. Угол, к которому примыкает
+        коридор или дверной проём, мусоркой не занимаем, иначе она
+        оказывается прямо на проходе.
+        """
+        closed: list[tuple[int, int]] = []
+        fallback: list[tuple[int, int]] = []
         for x, y, w, h in self.dungeon.rooms:
-            for corner in (
-                (x, y),
-                (x + w - 1, y),
-                (x, y + h - 1),
-                (x + w - 1, y + h - 1),
-            ):
+            corners = (
+                ((x, y), ((-1, 0), (0, -1), (-1, -1))),
+                ((x + w - 1, y), ((1, 0), (0, -1), (1, -1))),
+                ((x, y + h - 1), ((-1, 0), (0, 1), (-1, 1))),
+                (
+                    (x + w - 1, y + h - 1),
+                    ((1, 0), (0, 1), (1, 1)),
+                ),
+            )
+            for corner, outside in corners:
                 if corner == self.stairs:
                     continue
                 if self.player and corner == (self.player.x, self.player.y):
                     continue
-                corners.append(corner)
-        if not corners:
+                fallback.append(corner)
+                if all(
+                    self.dungeon.is_wall(corner[0] + dx, corner[1] + dy)
+                    for dx, dy in outside
+                ):
+                    closed.append(corner)
+        candidates = closed or fallback
+        if not candidates:
             return None
-        pos = random.choice(corners)
+        pos = random.choice(candidates)
         self.dungeon.grid[pos[1]][pos[0]] = TRASH_CHAR
         return pos
 
@@ -517,7 +536,8 @@ class Game:
         item = self.item_at(nx, ny)
         if item:
             self.pickup(item)
-        if (nx, ny) == self.trash_pos:
+        if (nx, ny) == self.trash_pos and not self.trash_noticed:
+            self.trash_noticed = True
             self.msg(
                 f"There is a trash bin here "
                 f"({len(self.trash_items)}/{TRASH_CAPACITY}). Press Tab to look inside."
