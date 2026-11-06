@@ -27,6 +27,9 @@ from constants import (
     MODE_HELP,
     MODE_INVENTORY,
     MODE_PLAYING,
+    MODE_TRASH,
+    TRASH_CAPACITY,
+    TRASH_CHAR,
 )
 from dungeon import Dungeon
 from entities import ENEMY_TYPES, Entity, Item, make_enemy, make_player, random_loot
@@ -90,6 +93,9 @@ class Game:
         self.killed_by = ""
         self.enemies: list[Entity] = []
         self.items: list[Item] = []
+        self.trash_pos: tuple[int, int] | None = None
+        self.trash_items: list[Item] = []
+        self.discard_mode = False
         self.visible = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.explored = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.dungeon: Dungeon
@@ -129,10 +135,33 @@ class Game:
 
         self.enemies = []
         self.items = []
+        self.trash_items = []
+        self.trash_pos = self._place_trash()
         self._spawn_enemies()
         self._spawn_items()
         self.explored = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.update_fov()
+
+    def _place_trash(self) -> tuple[int, int] | None:
+        """Поставить мусорку в угол случайной комнаты."""
+        corners: list[tuple[int, int]] = []
+        for x, y, w, h in self.dungeon.rooms:
+            for corner in (
+                (x, y),
+                (x + w - 1, y),
+                (x, y + h - 1),
+                (x + w - 1, y + h - 1),
+            ):
+                if corner == self.stairs:
+                    continue
+                if self.player and corner == (self.player.x, self.player.y):
+                    continue
+                corners.append(corner)
+        if not corners:
+            return None
+        pos = random.choice(corners)
+        self.dungeon.grid[pos[1]][pos[0]] = TRASH_CHAR
+        return pos
 
     def _spawn_enemies(self) -> None:
         num = 3 + self.depth
@@ -158,6 +187,8 @@ class Game:
             x = room[0] + random.randint(0, room[2] - 1)
             y = room[1] + random.randint(0, room[3] - 1)
             if self._occupied(x, y) or (x, y) == self.stairs:
+                continue
+            if (x, y) == self.trash_pos:
                 continue
             return x, y
         return None
@@ -208,8 +239,11 @@ class Game:
         defender.hp -= dmg
         if attacker is self.player:
             self.msg(f"You hit {defender.name} for {dmg}.")
+            self._wear_equipment(self.inventory.weapon)
         else:
             self.msg(f"{attacker.name} hits you for {dmg}.", "enemy")
+            if defender is self.player:
+                self._wear_equipment(self.inventory.armor)
 
         if not defender.alive():
             if defender is self.player:
@@ -222,6 +256,32 @@ class Game:
                 self.kills += 1
                 self.player_xp += defender.xp
                 self._check_level_up()
+
+    def _wear_equipment(self, item: Item | None) -> None:
+        """Износить оружие/броню на единицу и сломать при нуле."""
+        if item is None or item.max_durability <= 0:
+            return
+        item.durability = max(0, item.durability - 1)
+        if item.durability <= 0:
+            inventory = self.inventory
+            if inventory.weapon is item:
+                inventory.weapon = None
+            if inventory.armor is item:
+                inventory.armor = None
+            if item in inventory.items:
+                inventory.items.remove(item)
+            self.msg(f"Your {item.name} breaks!", "warn")
+            return
+        low_marks = {
+            max(1, item.max_durability // 4),
+            max(1, item.max_durability // 10),
+        }
+        if item.durability in low_marks:
+            self.msg(
+                f"Your {item.name} is wearing out "
+                f"({item.durability}/{item.max_durability}).",
+                "warn",
+            )
 
     def _check_level_up(self) -> None:
         while self.player_xp >= self.xp_next:
@@ -258,6 +318,11 @@ class Game:
         item = self.item_at(nx, ny)
         if item:
             self.pickup(item)
+        if (nx, ny) == self.trash_pos:
+            self.msg(
+                f"There is a trash bin here "
+                f"({len(self.trash_items)}/{TRASH_CAPACITY}). Press x to look inside."
+            )
         self.player_acted()
 
     def wait(self) -> None:
@@ -283,6 +348,55 @@ class Game:
             self.player_acted()
             return True
         return False
+
+    def on_trash(self) -> bool:
+        return self.trash_pos is not None and (
+            self.player.x,
+            self.player.y,
+        ) == self.trash_pos
+
+    def discard_item(self, index: int) -> bool:
+        """Выбросить предмет из рюкзака в мусорку под ногами."""
+        if not (0 <= index < len(self.inventory.items)):
+            return False
+        if not self.on_trash():
+            self.msg(
+                "You can only throw items away at the trash bin.",
+                "warn",
+            )
+            return False
+        if len(self.trash_items) >= TRASH_CAPACITY:
+            self.msg(
+                f"The trash is full ({TRASH_CAPACITY}/{TRASH_CAPACITY}).",
+                "warn",
+            )
+            return False
+        item = self.inventory.remove(index)
+        self.trash_items.append(item)
+        self.msg(
+            f"You throw {item.name} into the trash. "
+            f"({len(self.trash_items)}/{TRASH_CAPACITY})",
+            "item",
+        )
+        return True
+
+    def open_trash(self) -> None:
+        if not self.on_trash():
+            self.msg("There is no trash bin here.", "warn")
+            return
+        self.discard_mode = False
+        self.mode = MODE_TRASH
+
+    def take_from_trash(self, index: int) -> bool:
+        if not (0 <= index < len(self.trash_items)):
+            return False
+        item = self.trash_items[index]
+        if not self.inventory.add(item):
+            self.msg("Your pack is full.", "warn")
+            return False
+        self.trash_items.pop(index)
+        self.msg(f"You take {item.name} from the trash.", "item")
+        return True
 
     def teleport_player(self) -> bool:
         spots: list[tuple[int, int]] = []
@@ -376,6 +490,7 @@ class Game:
         self.win = win
         self.quit_requested = quit_requested
         self.game_over = True
+        self.discard_mode = False
         self.mode = MODE_DEAD
 
     def toggle_help(self) -> None:
@@ -383,8 +498,10 @@ class Game:
 
     def toggle_inventory(self) -> None:
         if self.mode == MODE_INVENTORY:
+            self.discard_mode = False
             self.mode = MODE_PLAYING
         elif self.mode == MODE_PLAYING:
+            self.discard_mode = False
             self.mode = MODE_INVENTORY
 
     def restart(self) -> None:

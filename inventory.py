@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from constants import FIRE_DAMAGE, FIRE_RADIUS, INVENTORY_CAPACITY
+from constants import (
+    FIRE_DAMAGE,
+    FIRE_RADIUS,
+    INVENTORY_CAPACITY,
+    STACK_LIMITS,
+)
 from entities import Item
 
 if TYPE_CHECKING:
@@ -24,13 +29,58 @@ class Inventory:
         return len(self.items) < self.capacity
 
     def add(self, item: Item) -> bool:
-        if not self.can_add():
-            return False
-        self.items.append(item)
-        return True
+        """Положить предмет в рюкзак, по возможности объединяя стопки.
+
+        Возвращает True, только если удалось перенести весь предмет. Если
+        место кончилось, у ``item`` останется неразмещённое количество.
+        """
+        limit = STACK_LIMITS.get(item.kind, 1)
+        if limit > 1:
+            for stack in self.items:
+                if not self._same_stack(stack, item):
+                    continue
+                room = limit - stack.quantity
+                if room <= 0:
+                    continue
+                moved = min(room, item.quantity)
+                stack.quantity += moved
+                item.quantity -= moved
+                if item.quantity <= 0:
+                    return True
+
+        while item.quantity > 0 and self.can_add():
+            take = min(limit, item.quantity) if limit > 1 else item.quantity
+            self.items.append(item.split(take))
+        return item.quantity <= 0
+
+    @staticmethod
+    def _same_stack(a: Item, b: Item) -> bool:
+        return (
+            a.kind == b.kind
+            and a.name == b.name
+            and a.effect == b.effect
+            and a.kind in STACK_LIMITS
+        )
+
+    def remove(self, index: int) -> Item:
+        """Убрать предмет из рюкзака целиком, сняв его с экипировки."""
+        item = self.items.pop(index)
+        if self.weapon is item:
+            self.weapon = None
+        if self.armor is item:
+            self.armor = None
+        return item
+
+    def consume(self, index: int) -> Item:
+        """Израсходовать одну штуку из стопки (зелье, свиток)."""
+        item = self.items[index]
+        item.quantity -= 1
+        if item.quantity <= 0:
+            self.items.pop(index)
+        return item
 
     def pop(self, index: int) -> Item:
-        return self.items.pop(index)
+        return self.remove(index)
 
     def letter_index(self, char: str) -> int | None:
         if len(char) != 1:
@@ -40,15 +90,31 @@ class Inventory:
             return idx
         return None
 
-    def label(self, item: Item) -> str:
+    @staticmethod
+    def item_label(item: Item) -> str:
         extra = ""
         if item.kind == "weapon":
-            extra = f" (+{item.value} ATK)"
+            extra = f" (+{item.value})"
         elif item.kind == "armor":
-            extra = f" (+{item.value} DEF)"
+            extra = f" (+{item.value})"
         elif item.kind == "potion":
             extra = f" (+{item.value} HP)"
+        if item.max_durability > 0:
+            extra += f" [{item.durability}/{item.max_durability}]"
+        if item.quantity > 1:
+            extra += f" ×{item.quantity}"
         return f"{item.name}{extra}"
+
+    def label(self, item: Item) -> str:
+        return self.item_label(item)
+
+    @staticmethod
+    def equipped_label(item: Item | None) -> str:
+        if item is None:
+            return "-"
+        if item.max_durability > 0:
+            return f"{item.name} [{item.durability}/{item.max_durability}]"
+        return item.name
 
     def use(self, index: int, game: Game) -> bool:
         if not (0 <= index < len(self.items)):
@@ -70,7 +136,7 @@ class Inventory:
         if game.player.hp >= game.player.max_hp:
             game.msg("You are already at full health.", "warn")
             return False
-        item = self.pop(index)
+        item = self.consume(index)
         missing = game.player.max_hp - game.player.hp
         heal = min(item.value, missing)
         game.player.hp += heal
@@ -102,16 +168,16 @@ class Inventory:
             if not game.teleport_player():
                 game.msg("The scroll fizzles. No space to teleport.")
                 return False
-            self.pop(index)
+            self.consume(index)
             game.msg("The world twists. You teleport!", "item")
             return True
         if effect == "mapping":
-            self.pop(index)
+            self.consume(index)
             game.reveal_map()
             game.msg("A map of this floor unfolds in your mind.", "item")
             return True
         if effect == "fire":
-            self.pop(index)
+            self.consume(index)
             hits = game.cast_fire(FIRE_RADIUS, FIRE_DAMAGE)
             if hits:
                 game.msg(f"Fire erupts around you! ({hits} burned)", "warn")

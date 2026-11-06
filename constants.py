@@ -23,11 +23,21 @@ HINT_Y = SCREEN_H - 1
 
 FOV_RADIUS = 8
 MAX_DEPTH = 10
-INVENTORY_CAPACITY = 20
+INVENTORY_CAPACITY = 26  # a-z
 FIRE_RADIUS = 3
 FIRE_DAMAGE = 12
 AGGRO_RANGE = 7
 LOG_HISTORY = 200
+
+# Стаки: зелья и свитки занимают один слот и складываются в стопку.
+STACK_LIMITS = {
+    "potion": 8,
+    "scroll": 4,
+}
+
+# Мусорка в углу комнаты.
+TRASH_CHAR = "%"
+TRASH_CAPACITY = 8
 
 # RGB
 COLOR_WALL = (135, 135, 155)
@@ -39,6 +49,8 @@ COLOR_ENEMY = (220, 70, 70)
 COLOR_ITEM = (210, 90, 210)
 COLOR_GOLD = (245, 205, 60)
 COLOR_STAIRS = (80, 225, 120)
+COLOR_TRASH = (165, 140, 100)
+COLOR_TRASH_DARK = (62, 52, 38)
 COLOR_HP = (90, 225, 220)
 COLOR_HP_OK = (90, 225, 130)
 COLOR_HP_MID = (245, 205, 80)
@@ -64,5 +76,6 @@ COLOR_ENEMY_DRAGON = (255, 70, 60)
 
 MODE_PLAYING = "playing"
 MODE_INVENTORY = "inventory"
+MODE_TRASH = "trash"
 MODE_HELP = "help"
 MODE_DEAD = "dead"

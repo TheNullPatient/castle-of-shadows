@@ -42,7 +42,7 @@ MOVE_KEYS = {
 _USED_CODEPOINTS = (
     set(range(32, 127))  # ASCII
     | set(range(0x2500, 0x2580))  # рамки, которые рисует draw_frame
-    | {ord(ch) for ch in "·—█░▒▲▼"}
+    | {ord(ch) for ch in "·—█░▒▲▼×"}
 )
 
 # Границы, чтобы окно нельзя было «уменьшить в ноль» и чтобы тайлсет
@@ -175,6 +175,8 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return False
     if game.mode == "inventory":
         return _handle_inventory(game, event)
+    if game.mode == "trash":
+        return _handle_trash(game, event)
 
     sym = event.sym
     if sym in (KeySym.Q,):
@@ -188,6 +190,9 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return False
     if sym == KeySym.I:
         game.toggle_inventory()
+        return False
+    if sym == KeySym.X:
+        game.open_trash()
         return False
     if sym in MOVE_KEYS:
         dx, dy = MOVE_KEYS[sym]
@@ -221,8 +226,23 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
 
 def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
-    if sym in (KeySym.ESCAPE, KeySym.I):
-        game.mode = "playing"
+    if sym == KeySym.ESCAPE:
+        if game.discard_mode:
+            game.discard_mode = False
+        else:
+            game.mode = "playing"
+        return False
+    if game.discard_mode:
+        letter = _letter(event)
+        if letter:
+            idx = game.inventory.letter_index(letter)
+            if idx is None:
+                game.msg("No item in that slot.")
+                return False
+            game.discard_item(idx)
+        return False
+    if sym in (KeySym.DELETE, KeySym.BACKSPACE):
+        game.discard_mode = True
         return False
     letter = _letter(event)
     if letter:
@@ -231,7 +251,23 @@ def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
             game.msg("No item in that slot.")
             return False
         if game.use_inventory(idx) and game.mode == "inventory":
+            game.discard_mode = False
             game.mode = "playing"
+    return False
+
+
+def _handle_trash(game: Game, event: tcod.event.KeyDown) -> bool:
+    sym = event.sym
+    if sym in (KeySym.ESCAPE, KeySym.X):
+        game.mode = "playing"
+        return False
+    letter = _letter(event)
+    if letter:
+        idx = ord(letter) - ord("a")
+        if idx < len(game.trash_items):
+            game.take_from_trash(idx)
+        else:
+            game.msg("No item in that slot.")
     return False
 
 

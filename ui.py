@@ -20,6 +20,8 @@ from constants import (
     COLOR_PANEL_LIGHT,
     COLOR_PLAYER,
     COLOR_STAIRS,
+    COLOR_TRASH,
+    COLOR_TRASH_DARK,
     COLOR_UI,
     COLOR_WALL,
     COLOR_WALL_DARK,
@@ -35,6 +37,8 @@ from constants import (
     SCREEN_H,
     SCREEN_W,
     STATUS_Y,
+    TRASH_CAPACITY,
+    TRASH_CHAR,
 )
 from game import MSG_COLORS, Game
 
@@ -44,14 +48,17 @@ HELP_ROWS = [
     ("Wait", ". or Space"),
     ("Pick up", "walk over an item (gold auto)"),
     ("Inventory", "i, then a-z to use / equip"),
+    ("Throw away", "in inventory: Del, then a-z (at the bin)"),
+    ("Trash", "stand on '%' and press x"),
     ("Descend", "stand on '>' and press > or Enter"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),
     ("Quit", "Q"),
     ("Restart", "R (on the death screen)"),
     ("", ""),
-    ("Potions", "heal; weapons and armor equip on use"),
-    ("Scrolls", "teleport, mapping, fire"),
+    ("Potions", "heal, stack up to 8"),
+    ("Scrolls", "teleport, mapping, fire; stack up to 4"),
+    ("Gear", "weapons/armor lose durability when used"),
     ("Goal", "descend 10 floors and escape"),
     ("", ""),
     ("", "Press any key to return..."),
@@ -95,6 +102,8 @@ def render(console: tcod.console.Console, game: Game) -> None:
     _render_hint(console)
     if game.mode == "inventory":
         _render_inventory(console, game)
+    elif game.mode == "trash":
+        _render_trash(console, game)
 
 
 def _render_map(console: tcod.console.Console, game: Game) -> None:
@@ -112,6 +121,8 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     fg = _tint(COLOR_WALL, light)
                 elif ch == ">":
                     fg = _tint(COLOR_STAIRS, 0.75 + light * 0.25)
+                elif ch == TRASH_CHAR:
+                    fg = _tint(COLOR_TRASH, 0.75 + light * 0.25)
                 else:
                     fg = _tint(COLOR_FLOOR, light)
                 bg = _warm_glow(game, x, y)
@@ -120,6 +131,8 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     fg = COLOR_WALL_DARK
                 elif ch == ">":
                     fg = (40, 90, 55)
+                elif ch == TRASH_CHAR:
+                    fg = COLOR_TRASH_DARK
                 else:
                     fg = COLOR_FLOOR_DARK
                 bg = COLOR_BG
@@ -239,9 +252,9 @@ def _render_hint(console: tcod.console.Console) -> None:
 
 def _render_inventory(console: tcod.console.Console, game: Game) -> None:
     inventory = game.inventory
-    width = min(MAP_W - 4, 66)
+    width = MAP_W
     height = MAP_H
-    x0 = max(1, (MAP_W - width) // 2)
+    x0 = 0
     y0 = 0
     console.draw_frame(
         x0,
@@ -254,8 +267,8 @@ def _render_inventory(console: tcod.console.Console, game: Game) -> None:
         clear=True,
     )
 
-    weapon = inventory.weapon.name if inventory.weapon else "-"
-    armor = inventory.armor.name if inventory.armor else "-"
+    weapon = inventory.equipped_label(inventory.weapon)
+    armor = inventory.equipped_label(inventory.armor)
     player = game.player
     console.print(
         x0 + 2,
@@ -286,9 +299,9 @@ def _render_inventory(console: tcod.console.Console, game: Game) -> None:
             x0 + 2, y0 + 5, "(empty)", fg=COLOR_DIM, bg=COLOR_PANEL
         )
     else:
-        columns = 2 if len(inventory.items) > 12 else 1
         rows_per_column = height - 7
-        column_width = (width - 4) // columns - 1
+        columns = 2 if len(inventory.items) > rows_per_column else 1
+        column_width = (width - 4) // columns - 1 if columns > 1 else width - 4
         for i, item in enumerate(inventory.items):
             column = i // rows_per_column
             row = i % rows_per_column
@@ -307,10 +320,54 @@ def _render_inventory(console: tcod.console.Console, game: Game) -> None:
                 bg=COLOR_PANEL,
             )
 
+    if game.discard_mode:
+        hint = "Throw away: choose a slot a-z   ESC cancel"
+    elif game.on_trash():
+        hint = "a-z use/equip   Del throw away   x look in trash   ESC close"
+    else:
+        hint = "a-z use/equip   Del throw away (stand on %)   ESC close"
     console.print(
         x0 + 2,
         y0 + height - 2,
-        "a-z use/equip   * equipped   ESC close",
+        hint[: width - 4],
+        fg=COLOR_WARN if game.discard_mode else COLOR_DIM,
+        bg=COLOR_PANEL,
+    )
+
+
+def _render_trash(console: tcod.console.Console, game: Game) -> None:
+    width = min(MAP_W - 4, 50)
+    height = min(MAP_H, TRASH_CAPACITY + 5)
+    x0 = max(1, (MAP_W - width) // 2)
+    y0 = max(1, (MAP_H - height) // 2)
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=f" Trash {len(game.trash_items)}/{TRASH_CAPACITY} ",
+        fg=COLOR_TRASH,
+        bg=COLOR_PANEL,
+        clear=True,
+    )
+    if not game.trash_items:
+        console.print(
+            x0 + 2, y0 + 2, "(empty)", fg=COLOR_DIM, bg=COLOR_PANEL
+        )
+    else:
+        for i, item in enumerate(game.trash_items[:TRASH_CAPACITY]):
+            letter = chr(ord("a") + i)
+            console.print(
+                x0 + 2,
+                y0 + 2 + i,
+                f" {letter}) {game.inventory.label(item)}"[: width - 4],
+                fg=item.color,
+                bg=COLOR_PANEL,
+            )
+    console.print(
+        x0 + 2,
+        y0 + height - 2,
+        "a-h take   ESC close"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )

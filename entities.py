@@ -51,6 +51,13 @@ class Item:
     effect: str = ""
     slot: str = ""
     identified: bool = True
+    quantity: int = 1
+    durability: int = 0
+    max_durability: int = 0
+
+    def __post_init__(self) -> None:
+        if self.max_durability > 0 and self.durability <= 0:
+            self.durability = self.max_durability
 
     def copy_at(self, x: int, y: int) -> Item:
         return Item(
@@ -64,7 +71,21 @@ class Item:
             effect=self.effect,
             slot=self.slot,
             identified=self.identified,
+            quantity=self.quantity,
+            durability=self.durability,
+            max_durability=self.max_durability,
         )
+
+    def copy(self) -> Item:
+        return self.copy_at(self.x, self.y)
+
+    def split(self, amount: int) -> Item:
+        """Отделить ``amount`` штук в новый предмет, уменьшив этот."""
+        amount = max(1, min(amount, self.quantity))
+        part = self.copy()
+        part.quantity = amount
+        self.quantity -= amount
+        return part
 
 
 ENEMY_TYPES = [
@@ -84,14 +105,29 @@ ENEMY_COLORS = {
 }
 
 WEAPON_TABLE = [
-    Item("Dagger", ")", "weapon", COLOR_WEAPON, value=1, slot="weapon"),
-    Item("Shortsword", ")", "weapon", COLOR_WEAPON, value=2, slot="weapon"),
-    Item("Battleaxe", ")", "weapon", COLOR_WEAPON, value=3, slot="weapon"),
+    Item(
+        "Dagger", ")", "weapon", COLOR_WEAPON, value=1, slot="weapon",
+        max_durability=35,
+    ),
+    Item(
+        "Shortsword", ")", "weapon", COLOR_WEAPON, value=2, slot="weapon",
+        max_durability=50,
+    ),
+    Item(
+        "Battleaxe", ")", "weapon", COLOR_WEAPON, value=3, slot="weapon",
+        max_durability=65,
+    ),
 ]
 
 ARMOR_TABLE = [
-    Item("Leather Armor", "[", "armor", COLOR_ARMOR, value=1, slot="armor"),
-    Item("Chain Mail", "[", "armor", COLOR_ARMOR, value=2, slot="armor"),
+    Item(
+        "Leather Armor", "[", "armor", COLOR_ARMOR, value=1, slot="armor",
+        max_durability=45,
+    ),
+    Item(
+        "Chain Mail", "[", "armor", COLOR_ARMOR, value=2, slot="armor",
+        max_durability=65,
+    ),
 ]
 
 SCROLL_TABLE = [
