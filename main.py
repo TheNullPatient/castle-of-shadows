@@ -306,7 +306,23 @@ def _handle_trash(game: Game, event: tcod.event.KeyDown) -> bool:
 def _handle_chest(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
     if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
-        game.close_chest()
+        if game.chest_deposit_mode:
+            game.chest_deposit_mode = False
+        else:
+            game.close_chest()
+        return False
+    if game.chest_deposit_mode:
+        letter = _letter(event)
+        if letter:
+            idx = game.inventory.letter_index(letter)
+            if idx is None:
+                game.msg("No item in that slot.")
+                return False
+            game.put_in_chest(idx)
+            game.chest_deposit_mode = False
+        return False
+    if sym in (KeySym.DELETE, KeySym.BACKSPACE):
+        game.chest_deposit_mode = True
         return False
     letter = _letter(event)
     if letter:

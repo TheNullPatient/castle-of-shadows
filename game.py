@@ -10,6 +10,7 @@ from tcod.constants import FOV_SYMMETRIC_SHADOWCAST
 
 from constants import (
     AGGRO_RANGE,
+    CHEST_CAPACITY,
     CHEST_TRAP_BONUS_GUARDED,
     CHEST_TRAP_CHANCE,
     CHEST_TRAP_MAX,
@@ -141,6 +142,7 @@ class Game:
         self.trash_noticed = False
         self.chests: list[Chest] = []
         self.active_chest: Chest | None = None
+        self.chest_deposit_mode = False
         self.chest_hinted = False
         self.special_rooms: list[tuple[int, int, int, int, str]] = []
         self.special_room_seen: set[tuple[int, int, int, int]] = set()
@@ -196,6 +198,7 @@ class Game:
         self.items = []
         self.chests = []
         self.active_chest = None
+        self.chest_deposit_mode = False
         self.chest_hinted = False
         self.special_rooms = []
         self.special_room_seen = set()
@@ -389,6 +392,7 @@ class Game:
             self.msg("The chest is empty.", "warn")
             return False
         self.active_chest = chest
+        self.chest_deposit_mode = False
         if not chest.opened:
             chest.opened = True
             self.msg("You open the chest.", "item")
@@ -412,6 +416,7 @@ class Game:
         if self.mode == MODE_CHEST:
             self.mode = MODE_PLAYING
         self.active_chest = None
+        self.chest_deposit_mode = False
 
     def take_from_chest(self, index: int) -> bool:
         chest = self.active_chest
@@ -435,6 +440,22 @@ class Game:
             self.chests.remove(chest)
             self.msg("The chest is empty.", "item")
             self.close_chest()
+        return True
+
+    def put_in_chest(self, index: int) -> bool:
+        """Положить предмет из рюкзака обратно в открытый сундук."""
+        chest = self.active_chest
+        if chest is None or not (0 <= index < len(self.inventory.items)):
+            return False
+        if len(chest.items) >= CHEST_CAPACITY:
+            self.msg(
+                f"The chest is full ({CHEST_CAPACITY}/{CHEST_CAPACITY}).",
+                "warn",
+            )
+            return False
+        item = self.inventory.remove(index)
+        chest.items.append(item)
+        self.msg(f"You put {item.name} in the chest.", "item")
         return True
 
     def chest_nearby(self) -> Chest | None:
