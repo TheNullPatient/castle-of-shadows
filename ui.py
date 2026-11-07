@@ -55,10 +55,11 @@ HELP_ROWS = [
     ("Attack", "bump into an enemy"),
     ("Wait", ". or Space"),
     ("Pick up", "walk over an item (gold auto)"),
-    ("Inventory", "i, then a-z to use / equip"),
+    ("Inventory", "Tab, then a-z to use / equip"),
+    ("Interact", "i: chest nearby / trash underfoot"),
     ("Throw away", "in inventory: Del, then a-z (at the bin)"),
-    ("Trash", "stand on '%' and press Tab (may hold loot)"),
-    ("Chests", "walk into '='; a-z take, Esc close"),
+    ("Trash", "stand on '%' and press i"),
+    ("Chests", "stand next to '=' and press i"),
     ("Vaults", "gold/red rooms hide chests and guards"),
     ("Descend", "stand on '>' and press > or Enter"),
     ("Log", "PgUp / PgDn, or - / ="),
@@ -292,14 +293,14 @@ def _render_hint(console: tcod.console.Console) -> None:
         (" · ", COLOR_DIM),
         (".", COLOR_UI),
         (" wait · ", COLOR_DIM),
-        ("i", COLOR_UI),
+        ("Tab", COLOR_UI),
         (" inv · ", COLOR_DIM),
+        ("i", COLOR_UI),
+        (" interact · ", COLOR_DIM),
         (">", COLOR_UI),
         (" descend · ", COLOR_DIM),
         ("?", COLOR_UI),
         (" help · ", COLOR_DIM),
-        ("PgUp/Dn", COLOR_UI),
-        (" log · ", COLOR_DIM),
         ("Q", COLOR_UI),
         (" quit", COLOR_DIM),
     ]
@@ -379,9 +380,9 @@ def _render_inventory(console: tcod.console.Console, game: Game) -> None:
     if game.discard_mode:
         hint = "Throw away: choose a slot a-z   ESC cancel"
     elif game.on_trash():
-        hint = "a-z use/equip   Del throw away   Tab look in trash   ESC close"
+        hint = "a-z use/equip   Del throw away   Tab/Esc close"
     else:
-        hint = "a-z use/equip   Del throw away (stand on %)   ESC close"
+        hint = "a-z use/equip   Del throw away (stand on %)   Tab/Esc close"
     console.print(
         x0 + 2,
         y0 + height - 2,

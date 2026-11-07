@@ -141,6 +141,7 @@ class Game:
         self.trash_noticed = False
         self.chests: list[Chest] = []
         self.active_chest: Chest | None = None
+        self.chest_hinted = False
         self.special_rooms: list[tuple[int, int, int, int, str]] = []
         self.special_room_seen: set[tuple[int, int, int, int]] = set()
         self.discard_mode = False
@@ -195,6 +196,7 @@ class Game:
         self.items = []
         self.chests = []
         self.active_chest = None
+        self.chest_hinted = False
         self.special_rooms = []
         self.special_room_seen = set()
         self.trash_items = []
@@ -434,6 +436,44 @@ class Game:
             self.msg("The chest is empty.", "item")
             self.close_chest()
         return True
+
+    def chest_nearby(self) -> Chest | None:
+        """Ближайший сундук в соседней клетке (включая диагонали)."""
+        if self.player is None:
+            return None
+        nearby = [
+            chest
+            for chest in self.chests
+            if max(
+                abs(chest.x - self.player.x),
+                abs(chest.y - self.player.y),
+            ) == 1
+        ]
+        if not nearby:
+            return None
+        return min(
+            nearby,
+            key=lambda chest: (
+                abs(chest.x - self.player.x) + abs(chest.y - self.player.y),
+                chest.y,
+                chest.x,
+            ),
+        )
+
+    def interact(self) -> bool:
+        """Взаимодействовать с мусоркой под ногами или сундуком рядом."""
+        if self.game_over:
+            return False
+        if self.on_trash():
+            self.open_trash()
+            return True
+        chest = self.chest_nearby()
+        if chest is not None:
+            if self.open_chest(chest):
+                self.player_acted()
+            return True
+        self.msg("There is nothing to interact with here.", "warn")
+        return False
 
     def _spring_chest_trap(self) -> None:
         if random.random() < 0.5:
@@ -765,8 +805,12 @@ class Game:
             return
         chest = self.chest_at(nx, ny)
         if chest:
-            if self.open_chest(chest):
-                self.player_acted()
+            if not self.chest_hinted:
+                self.chest_hinted = True
+                self.msg(
+                    "A chest blocks the way. Press 'i' to interact.",
+                    "warn",
+                )
             return
         if not self.walkable(nx, ny):
             return
