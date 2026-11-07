@@ -99,6 +99,15 @@ class Item:
         return part
 
 
+@dataclass
+class Chest:
+    """Сундук в особой комнате. Открывается шагом в его клетку."""
+
+    x: int
+    y: int
+    guarded: bool = False
+
+
 ENEMY_TYPES = [
     ("r", "Rat", 4, 2, 0, 2, 0, "melee"),
     ("b", "Bat", 3, 2, 0, 2, 0, "fast"),
@@ -223,6 +232,18 @@ def make_enemy(kind: tuple, x: int, y: int, depth: int) -> Entity:
     )
 
 
+def _weapon_pool(depth: int) -> list[Item]:
+    if depth < 4:
+        return WEAPON_TABLE[:3]
+    if depth < 6:
+        return WEAPON_TABLE[1:4]
+    return WEAPON_TABLE[2:]
+
+
+def _armor_pool(depth: int) -> list[Item]:
+    return ARMOR_TABLE[:2] if depth < 5 else ARMOR_TABLE[1:]
+
+
 def random_loot(x: int, y: int, depth: int) -> Item:
     roll = random.random()
     if roll < 0.28:
@@ -230,14 +251,41 @@ def random_loot(x: int, y: int, depth: int) -> Item:
     if roll < 0.55:
         return random.choice(POTION_TABLE).copy_at(x, y)
     if roll < 0.72:
-        if depth < 4:
-            pool = WEAPON_TABLE[:3]
-        elif depth < 6:
-            pool = WEAPON_TABLE[1:4]
-        else:
-            pool = WEAPON_TABLE[2:]
-        return random.choice(pool).copy_at(x, y)
+        return random.choice(_weapon_pool(depth)).copy_at(x, y)
     if roll < 0.86:
-        pool = ARMOR_TABLE[:2] if depth < 5 else ARMOR_TABLE[1:]
-        return random.choice(pool).copy_at(x, y)
+        return random.choice(_armor_pool(depth)).copy_at(x, y)
     return random.choice(SCROLL_TABLE).copy_at(x, y)
+
+
+def make_chest_loot(depth: int, guarded: bool = False) -> list[Item]:
+    """Содержимое сундука: золото плюс 2-4 предмета по глубине."""
+    low = 10 + depth * 3
+    high = 18 + depth * 5
+    gold = random.randint(low, high)
+    if guarded:
+        gold = int(gold * 1.5)
+    loot = [Item("Gold", "$", "gold", COLOR_GOLD, value=gold)]
+
+    count = random.randint(2, 3) + (1 if guarded else 0)
+    for _ in range(count):
+        roll = random.random()
+        if roll < 0.30:
+            loot.append(random.choice(POTION_TABLE).copy())
+        elif roll < 0.55:
+            loot.append(random.choice(SCROLL_TABLE).copy())
+        elif roll < 0.85:
+            if random.random() < 0.5:
+                loot.append(random.choice(_weapon_pool(depth)).copy())
+            else:
+                loot.append(random.choice(_armor_pool(depth)).copy())
+        else:
+            loot.append(
+                Item(
+                    "Gold",
+                    "$",
+                    "gold",
+                    COLOR_GOLD,
+                    value=random.randint(5 + depth, 12 + depth * 2),
+                )
+            )
+    return loot

@@ -10,6 +10,10 @@ from tcod.constants import FOV_SYMMETRIC_SHADOWCAST
 
 from constants import (
     AGGRO_RANGE,
+    CHEST_TRAP_BONUS_GUARDED,
+    CHEST_TRAP_CHANCE,
+    CHEST_TRAP_MAX,
+    CHEST_TRAP_PER_DEPTH,
     COLOR_ENEMY,
     COLOR_GOOD,
     COLOR_GOLD,
@@ -50,8 +54,10 @@ from dungeon import Dungeon
 from entities import (
     ENEMY_BY_NAME,
     ENEMY_TYPES,
+    Chest,
     Entity,
     Item,
+    make_chest_loot,
     make_enemy,
     make_player,
     random_loot,
@@ -66,6 +72,12 @@ MSG_COLORS = {
     "warn": COLOR_WARN,
     "heal": COLOR_GOOD,
     "good": COLOR_HP,
+}
+
+SPECIAL_ROOM_TEXT = {
+    "vault": "You enter a treasure vault. A chest waits in the corner.",
+    "guarded": "You enter a guarded vault. Something stirs in the dark.",
+    "camp": "You enter an abandoned camp. Leftovers lie scattered around.",
 }
 
 
@@ -126,6 +138,9 @@ class Game:
         self.trash_pos: tuple[int, int] | None = None
         self.trash_items: list[Item] = []
         self.trash_noticed = False
+        self.chests: list[Chest] = []
+        self.special_rooms: list[tuple[int, int, int, int, str]] = []
+        self.special_room_seen: set[tuple[int, int, int, int]] = set()
         self.discard_mode = False
         self.visible = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.explored = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
@@ -176,9 +191,13 @@ class Game:
 
         self.enemies = []
         self.items = []
+        self.chests = []
+        self.special_rooms = []
+        self.special_room_seen = set()
         self.trash_items = []
         self.trash_noticed = False
         self.trash_pos = self._place_trash()
+        self._prepare_special_rooms()
         self._spawn_enemies()
         self._spawn_items()
         self._spawn_trash_loot()
@@ -223,6 +242,205 @@ class Game:
         self.dungeon.grid[pos[1]][pos[0]] = TRASH_CHAR
         return pos
 
+    def _prepare_special_rooms(self) -> None:
+        """Сделать 1-2 комнаты особыми: сокровищница, засада или лагерь."""
+        rooms = self.dungeon.rooms
+        if len(rooms) < 3:
+            return
+        candidates = list(range(1, len(rooms) - 1))
+        if not candidates:
+            return
+        count = 1
+        if (
+            self.depth >= 4
+            and len(candidates) >= 2
+            and random.random() < 0.35
+        ):
+            count = 2
+        for idx in random.sample(candidates, min(count, len(candidates))):
+            room = rooms[idx]
+            kind = random.choices(
+                ("vault", "guarded", "camp"),
+                weights=(0.45, 0.35, 0.20),
+            )[0]
+            self.special_rooms.append((*room, kind))
+            if kind in ("vault", "guarded"):
+                self._place_chest(room, guarded=kind == "guarded")
+            if kind == "guarded":
+                for _ in range(1 + (self.depth >= 6)):
+                    self._spawn_guard(room)
+            elif kind == "vault":
+                pos = self._free_spot_in_room(room)
+                if pos is not None:
+                    self.items.append(random_loot(pos[0], pos[1], self.depth))
+            else:
+                for _ in range(random.randint(2, 3)):
+                    pos = self._free_spot_in_room(room)
+                    if pos is not None:
+                        self.items.append(
+                            random_loot(pos[0], pos[1], self.depth)
+                        )
+
+    def _is_special_room(self, room: tuple[int, int, int, int]) -> bool:
+        return any(entry[:4] == room for entry in self.special_rooms)
+
+    def _free_spot_in_room(
+        self,
+        room: tuple[int, int, int, int],
+    ) -> tuple[int, int] | None:
+        x, y, w, h = room
+        for _ in range(40):
+            px = x + random.randint(0, w - 1)
+            py = y + random.randint(0, h - 1)
+            if (px, py) in (self.stairs, self.trash_pos):
+                continue
+            if self.chest_at(px, py) or self._occupied(px, py):
+                continue
+            return px, py
+        return None
+
+    def _place_chest(
+        self,
+        room: tuple[int, int, int, int],
+        guarded: bool = False,
+    ) -> None:
+        x, y, w, h = room
+        inner = [
+            (x + 1, y + 1),
+            (x + w - 2, y + 1),
+            (x + 1, y + h - 2),
+            (x + w - 2, y + h - 2),
+        ]
+        candidates = [
+            spot
+            for spot in inner
+            if self.walkable(*spot)
+            and spot not in (self.stairs, self.trash_pos)
+            and not self.chest_at(*spot)
+            and not self._occupied(*spot)
+        ]
+        pos = (
+            random.choice(candidates)
+            if candidates
+            else self._free_spot_in_room(room)
+        )
+        if pos is not None:
+            self.chests.append(Chest(pos[0], pos[1], guarded))
+
+    def _spawn_guard(self, room: tuple[int, int, int, int]) -> None:
+        pos = self._free_spot_in_room(room)
+        if pos is None:
+            return
+        pool = [
+            e
+            for e in ENEMY_TYPES
+            if e[6] <= self.depth // 2 + 1
+        ] or [ENEMY_TYPES[0]]
+        kind = random.choice(pool)
+        self.enemies.append(make_enemy(kind, pos[0], pos[1], self.depth))
+
+    def _special_room_entry_at(
+        self,
+        x: int,
+        y: int,
+    ) -> tuple[int, int, int, int, str] | None:
+        for entry in self.special_rooms:
+            sx, sy, w, h, _kind = entry
+            if sx <= x < sx + w and sy <= y < sy + h:
+                return entry
+        return None
+
+    def special_room_at(self, x: int, y: int) -> str | None:
+        entry = self._special_room_entry_at(x, y)
+        return entry[4] if entry else None
+
+    def _notice_special_room(self) -> None:
+        entry = self._special_room_entry_at(self.player.x, self.player.y)
+        if entry is None:
+            return
+        key = entry[:4]
+        if key in self.special_room_seen:
+            return
+        self.special_room_seen.add(key)
+        self.msg(SPECIAL_ROOM_TEXT[entry[4]], "good")
+
+    def chest_at(self, x: int, y: int) -> Chest | None:
+        return next(
+            (c for c in self.chests if (c.x, c.y) == (x, y)),
+            None,
+        )
+
+    def open_chest(self, chest: Chest) -> None:
+        """Открыть сундук: возможная ловушка, затем золото и предметы."""
+        self.chests.remove(chest)
+        self.msg("You open the chest.", "item")
+        chance = min(
+            CHEST_TRAP_MAX,
+            CHEST_TRAP_CHANCE
+            + self.depth * CHEST_TRAP_PER_DEPTH
+            + (CHEST_TRAP_BONUS_GUARDED if chest.guarded else 0.0),
+        )
+        if random.random() < chance:
+            self._spring_chest_trap()
+            if self.game_over:
+                return
+
+        loot = make_chest_loot(self.depth, chest.guarded)
+        gold = sum(item.value for item in loot if item.kind == "gold")
+        if gold:
+            self.gold += gold
+            self.msg(f"You find {gold} gold in the chest.", "gold")
+        for item in loot:
+            if item.kind == "gold":
+                continue
+            if self.inventory.add(item):
+                self.msg(f"You take {item.name} from the chest.", "item")
+            else:
+                self._drop_item_near(item, chest.x, chest.y)
+                self.msg(
+                    f"Your pack is full; {item.name} drops to the floor.",
+                    "warn",
+                )
+
+    def _spring_chest_trap(self) -> None:
+        if random.random() < 0.5:
+            dmg = random.randint(1, 3 + self.depth // 3)
+            self.msg(f"A dart trap hits you for {dmg}.", "warn")
+            self._hurt_player(dmg, "a chest trap", wear_armor=False)
+            return
+        turns = 4 + self.depth // 2
+        self.poison_turns = max(self.poison_turns, turns)
+        self.poison_damage = max(self.poison_damage, POISON_DAMAGE)
+        self.msg(
+            f"Poison gas escapes the chest! ({self.poison_turns} turns)",
+            "warn",
+        )
+
+    def _drop_item_near(self, item: Item, x: int, y: int) -> None:
+        player_pos = (
+            (self.player.x, self.player.y) if self.player is not None else None
+        )
+        spots = [(x, y)]
+        for dy in range(-2, 3):
+            for dx in range(-2, 3):
+                if dx == 0 and dy == 0:
+                    continue
+                spots.append((x + dx, y + dy))
+        for px, py in spots:
+            if not self.walkable(px, py):
+                continue
+            if (px, py) == self.stairs or (px, py) == player_pos:
+                continue
+            if self.chest_at(px, py) or self.enemy_at(px, py):
+                continue
+            if self.item_at(px, py):
+                continue
+            item.x, item.y = px, py
+            self.items.append(item)
+            return
+        item.x, item.y = x, y
+        self.items.append(item)
+
     def _spawn_enemies(self) -> None:
         num = 3 + self.depth
         pool = [e for e in ENEMY_TYPES if e[6] <= self.depth // 2 + 1] or [ENEMY_TYPES[0]]
@@ -257,7 +475,11 @@ class Game:
             )
 
     def _free_spot(self) -> tuple[int, int] | None:
-        rooms = self.dungeon.rooms[1:] or self.dungeon.rooms
+        rooms = [
+            room
+            for room in self.dungeon.rooms[1:]
+            if not self._is_special_room(room)
+        ] or self.dungeon.rooms
         for _ in range(40):
             room = random.choice(rooms)
             x = room[0] + random.randint(0, room[2] - 1)
@@ -273,6 +495,8 @@ class Game:
         if self.player and (self.player.x, self.player.y) == (x, y):
             return True
         if any((e.x, e.y) == (x, y) for e in self.enemies):
+            return True
+        if any((c.x, c.y) == (x, y) for c in self.chests):
             return True
         if not ignore_items and any((i.x, i.y) == (x, y) for i in self.items):
             return True
@@ -513,6 +737,7 @@ class Game:
         if self.game_over:
             return
         self.turns += 1
+        self._notice_special_room()
         self.enemy_turn()
         if not self.game_over:
             self._poison_tick()
@@ -528,6 +753,11 @@ class Game:
         enemy = self.enemy_at(nx, ny)
         if enemy:
             self.attack(self.player, enemy)
+            self.player_acted()
+            return
+        chest = self.chest_at(nx, ny)
+        if chest:
+            self.open_chest(chest)
             self.player_acted()
             return
         if not self.walkable(nx, ny):
@@ -626,7 +856,12 @@ class Game:
         spots: list[tuple[int, int]] = []
         for y in range(MAP_H):
             for x in range(MAP_W):
-                if self.walkable(x, y) and not self.enemy_at(x, y) and (x, y) != (self.player.x, self.player.y):
+                if (
+                    self.walkable(x, y)
+                    and not self.enemy_at(x, y)
+                    and not self.chest_at(x, y)
+                    and (x, y) != (self.player.x, self.player.y)
+                ):
                     spots.append((x, y))
         if not spots:
             return False
@@ -682,6 +917,8 @@ class Game:
                     cost[x, y] = 1
         for e in self.enemies:
             cost[e.x, e.y] = 0
+        for chest in self.chests:
+            cost[chest.x, chest.y] = 0
         cost[self.player.x, self.player.y] = 1
         return cost
 
@@ -797,7 +1034,11 @@ class Game:
             if (nx, ny) == (self.player.x, self.player.y):
                 self._melee_enemy(e)
                 continue
-            if self.walkable(nx, ny) and not self.enemy_at(nx, ny):
+            if (
+                self.walkable(nx, ny)
+                and not self.enemy_at(nx, ny)
+                and not self.chest_at(nx, ny)
+            ):
                 e.x, e.y = nx, ny
 
     def descend(self) -> None:

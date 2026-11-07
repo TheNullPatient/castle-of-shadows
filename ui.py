@@ -6,11 +6,16 @@ import math
 import tcod.console
 
 from constants import (
+    CHEST_CHAR,
     COLOR_BG,
+    COLOR_CAMP_FLOOR,
+    COLOR_CHEST,
+    COLOR_CHEST_GUARDED,
     COLOR_DIM,
     COLOR_FLOOR,
     COLOR_FLOOR_DARK,
     COLOR_GOLD,
+    COLOR_GUARDED_FLOOR,
     COLOR_HP,
     COLOR_HP_LOW,
     COLOR_HP_MID,
@@ -23,6 +28,7 @@ from constants import (
     COLOR_TRASH,
     COLOR_TRASH_DARK,
     COLOR_UI,
+    COLOR_VAULT_FLOOR,
     COLOR_WALL,
     COLOR_WALL_DARK,
     COLOR_WARN,
@@ -51,6 +57,8 @@ HELP_ROWS = [
     ("Inventory", "i, then a-z to use / equip"),
     ("Throw away", "in inventory: Del, then a-z (at the bin)"),
     ("Trash", "stand on '%' and press Tab (may hold loot)"),
+    ("Chests", "walk into '=' to open; some are trapped"),
+    ("Vaults", "gold/red rooms hide chests and guards"),
     ("Descend", "stand on '>' and press > or Enter"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),
@@ -114,6 +122,16 @@ def render(console: tcod.console.Console, game: Game) -> None:
         _render_trash(console, game)
 
 
+def _special_floor_color(kind: str | None) -> tuple[int, int, int] | None:
+    if kind == "vault":
+        return COLOR_VAULT_FLOOR
+    if kind == "guarded":
+        return COLOR_GUARDED_FLOOR
+    if kind == "camp":
+        return COLOR_CAMP_FLOOR
+    return None
+
+
 def _render_map(console: tcod.console.Console, game: Game) -> None:
     grid = game.dungeon.grid
     for y in range(MAP_H):
@@ -123,6 +141,7 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
             explored = game.is_explored(x, y)
             if not visible and not explored:
                 continue
+            special = _special_floor_color(game.special_room_at(x, y))
             if visible:
                 light = _light(game, x, y)
                 if ch == "#":
@@ -132,7 +151,7 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                 elif ch == TRASH_CHAR:
                     fg = _tint(COLOR_TRASH, 0.75 + light * 0.25)
                 else:
-                    fg = _tint(COLOR_FLOOR, light)
+                    fg = _tint(special or COLOR_FLOOR, light)
                 bg = _warm_glow(game, x, y)
             else:
                 if ch == "#":
@@ -141,6 +160,8 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     fg = (40, 90, 55)
                 elif ch == TRASH_CHAR:
                     fg = COLOR_TRASH_DARK
+                elif special:
+                    fg = _tint(special, 0.22)
                 else:
                     fg = COLOR_FLOOR_DARK
                 bg = COLOR_BG
@@ -148,6 +169,10 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
 
 
 def _render_entities(console: tcod.console.Console, game: Game) -> None:
+    for chest in game.chests:
+        if game.is_visible(chest.x, chest.y):
+            color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
+            _put(console, chest.x, chest.y, CHEST_CHAR, color)
     for item in game.items:
         if game.is_visible(item.x, item.y):
             _put(console, item.x, item.y, item.char, item.color)
