@@ -461,10 +461,10 @@ class Game:
         )
 
     def interact(self) -> bool:
-        """Взаимодействовать с мусоркой под ногами или сундуком рядом."""
+        """Взаимодействовать с мусоркой или сундуком рядом."""
         if self.game_over:
             return False
-        if self.on_trash():
+        if self.near_trash():
             self.open_trash()
             return True
         chest = self.chest_nearby()
@@ -812,18 +812,22 @@ class Game:
                     "warn",
                 )
             return
+        if (nx, ny) == self.trash_pos:
+            if not self.trash_noticed:
+                self.trash_noticed = True
+                self.msg(
+                    f"A trash bin blocks the way "
+                    f"({len(self.trash_items)}/{TRASH_CAPACITY}). "
+                    f"Press 'i' to interact.",
+                    "warn",
+                )
+            return
         if not self.walkable(nx, ny):
             return
         self.player.x, self.player.y = nx, ny
         item = self.item_at(nx, ny)
         if item:
             self.pickup(item)
-        if (nx, ny) == self.trash_pos and not self.trash_noticed:
-            self.trash_noticed = True
-            self.msg(
-                f"There is a trash bin here "
-                f"({len(self.trash_items)}/{TRASH_CAPACITY}). Press Tab to look inside."
-            )
         self.player_acted()
 
     def wait(self) -> None:
@@ -856,13 +860,25 @@ class Game:
             self.player.y,
         ) == self.trash_pos
 
+    def trash_nearby(self) -> bool:
+        """Мусорка стоит в соседней клетке (включая диагонали)."""
+        if self.trash_pos is None or self.player is None:
+            return False
+        return max(
+            abs(self.trash_pos[0] - self.player.x),
+            abs(self.trash_pos[1] - self.player.y),
+        ) == 1
+
+    def near_trash(self) -> bool:
+        return self.on_trash() or self.trash_nearby()
+
     def discard_item(self, index: int) -> bool:
-        """Выбросить предмет из рюкзака в мусорку под ногами."""
+        """Выбросить предмет из рюкзака в мусорку рядом."""
         if not (0 <= index < len(self.inventory.items)):
             return False
-        if not self.on_trash():
+        if not self.near_trash():
             self.msg(
-                "You can only throw items away at the trash bin.",
+                "You can only throw items away next to the trash bin.",
                 "warn",
             )
             return False
@@ -882,8 +898,8 @@ class Game:
         return True
 
     def open_trash(self) -> None:
-        if not self.on_trash():
-            self.msg("There is no trash bin here.", "warn")
+        if not self.near_trash():
+            self.msg("There is no trash bin nearby.", "warn")
             return
         self.discard_mode = False
         self.mode = MODE_TRASH
@@ -971,6 +987,8 @@ class Game:
             cost[e.x, e.y] = 0
         for chest in self.chests:
             cost[chest.x, chest.y] = 0
+        if self.trash_pos is not None:
+            cost[self.trash_pos[0], self.trash_pos[1]] = 0
         cost[self.player.x, self.player.y] = 1
         return cost
 
@@ -1090,6 +1108,7 @@ class Game:
                 self.walkable(nx, ny)
                 and not self.enemy_at(nx, ny)
                 and not self.chest_at(nx, ny)
+                and (nx, ny) != self.trash_pos
             ):
                 e.x, e.y = nx, ny
 

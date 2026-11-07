@@ -56,9 +56,9 @@ HELP_ROWS = [
     ("Wait", ". or Space"),
     ("Pick up", "walk over an item (gold auto)"),
     ("Inventory", "Tab, then a-z to use / equip"),
-    ("Interact", "i: chest nearby / trash underfoot"),
-    ("Throw away", "in inventory: Del, then a-z (at the bin)"),
-    ("Trash", "stand on '%' and press i"),
+    ("Interact", "i: chest / trash nearby"),
+    ("Throw away", "in inventory: Del, then a-z (next to the bin)"),
+    ("Trash", "stand next to '%' and press i"),
     ("Chests", "stand next to '=' and press i"),
     ("Vaults", "gold/red rooms hide chests and guards"),
     ("Descend", "stand on '>' and press > or Enter"),
@@ -379,10 +379,10 @@ def _render_inventory(console: tcod.console.Console, game: Game) -> None:
 
     if game.discard_mode:
         hint = "Throw away: choose a slot a-z   ESC cancel"
-    elif game.on_trash():
+    elif game.near_trash():
         hint = "a-z use/equip   Del throw away   Tab/Esc close"
     else:
-        hint = "a-z use/equip   Del throw away (stand on %)   Tab/Esc close"
+        hint = "a-z use/equip   Del throw away (stand next to %)   Tab/Esc close"
     console.print(
         x0 + 2,
         y0 + height - 2,
