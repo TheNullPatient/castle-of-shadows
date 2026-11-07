@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from constants import (
     COLOR_ARMOR,
@@ -106,6 +106,8 @@ class Chest:
     x: int
     y: int
     guarded: bool = False
+    opened: bool = False
+    items: list[Item] = field(default_factory=list)
 
 
 ENEMY_TYPES = [
@@ -264,28 +266,21 @@ def make_chest_loot(depth: int, guarded: bool = False) -> list[Item]:
     gold = random.randint(low, high)
     if guarded:
         gold = int(gold * 1.5)
-    loot = [Item("Gold", "$", "gold", COLOR_GOLD, value=gold)]
 
+    items: list[Item] = []
     count = random.randint(2, 3) + (1 if guarded else 0)
     for _ in range(count):
         roll = random.random()
-        if roll < 0.30:
-            loot.append(random.choice(POTION_TABLE).copy())
-        elif roll < 0.55:
-            loot.append(random.choice(SCROLL_TABLE).copy())
-        elif roll < 0.85:
-            if random.random() < 0.5:
-                loot.append(random.choice(_weapon_pool(depth)).copy())
-            else:
-                loot.append(random.choice(_armor_pool(depth)).copy())
+        if roll < 0.36:
+            items.append(random.choice(POTION_TABLE).copy())
+        elif roll < 0.65:
+            items.append(random.choice(SCROLL_TABLE).copy())
+        elif random.random() < 0.5:
+            items.append(random.choice(_weapon_pool(depth)).copy())
         else:
-            loot.append(
-                Item(
-                    "Gold",
-                    "$",
-                    "gold",
-                    COLOR_GOLD,
-                    value=random.randint(5 + depth, 12 + depth * 2),
-                )
-            )
-    return loot
+            items.append(random.choice(_armor_pool(depth)).copy())
+
+    return [
+        Item("Gold", "$", "gold", COLOR_GOLD, value=gold),
+        *items,
+    ]

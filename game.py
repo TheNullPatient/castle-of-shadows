@@ -33,6 +33,7 @@ from constants import (
     MAP_W,
     MAX_DEPTH,
     MAX_ENEMIES,
+    MODE_CHEST,
     MODE_DEAD,
     MODE_HELP,
     MODE_INVENTORY,
@@ -139,6 +140,7 @@ class Game:
         self.trash_items: list[Item] = []
         self.trash_noticed = False
         self.chests: list[Chest] = []
+        self.active_chest: Chest | None = None
         self.special_rooms: list[tuple[int, int, int, int, str]] = []
         self.special_room_seen: set[tuple[int, int, int, int]] = set()
         self.discard_mode = False
@@ -192,6 +194,7 @@ class Game:
         self.enemies = []
         self.items = []
         self.chests = []
+        self.active_chest = None
         self.special_rooms = []
         self.special_room_seen = set()
         self.trash_items = []
@@ -325,7 +328,14 @@ class Game:
             else self._free_spot_in_room(room)
         )
         if pos is not None:
-            self.chests.append(Chest(pos[0], pos[1], guarded))
+            self.chests.append(
+                Chest(
+                    pos[0],
+                    pos[1],
+                    guarded,
+                    items=make_chest_loot(self.depth, guarded),
+                )
+            )
 
     def _spawn_guard(self, room: tuple[int, int, int, int]) -> None:
         pos = self._free_spot_in_room(room)
@@ -370,37 +380,60 @@ class Game:
             None,
         )
 
-    def open_chest(self, chest: Chest) -> None:
-        """Открыть сундук: возможная ловушка, затем золото и предметы."""
-        self.chests.remove(chest)
-        self.msg("You open the chest.", "item")
-        chance = min(
-            CHEST_TRAP_MAX,
-            CHEST_TRAP_CHANCE
-            + self.depth * CHEST_TRAP_PER_DEPTH
-            + (CHEST_TRAP_BONUS_GUARDED if chest.guarded else 0.0),
-        )
-        if random.random() < chance:
-            self._spring_chest_trap()
-            if self.game_over:
-                return
+    def open_chest(self, chest: Chest) -> bool:
+        """Открыть сундук и показать содержимое в отдельном меню."""
+        if not chest.items:
+            self.chests.remove(chest)
+            self.msg("The chest is empty.", "warn")
+            return False
+        self.active_chest = chest
+        if not chest.opened:
+            chest.opened = True
+            self.msg("You open the chest.", "item")
+            chance = min(
+                CHEST_TRAP_MAX,
+                CHEST_TRAP_CHANCE
+                + self.depth * CHEST_TRAP_PER_DEPTH
+                + (CHEST_TRAP_BONUS_GUARDED if chest.guarded else 0.0),
+            )
+            if random.random() < chance:
+                self._spring_chest_trap()
+                if self.game_over:
+                    self.active_chest = None
+                    return False
+        else:
+            self.msg("You reopen the chest.", "item")
+        self.mode = MODE_CHEST
+        return True
 
-        loot = make_chest_loot(self.depth, chest.guarded)
-        gold = sum(item.value for item in loot if item.kind == "gold")
-        if gold:
-            self.gold += gold
-            self.msg(f"You find {gold} gold in the chest.", "gold")
-        for item in loot:
-            if item.kind == "gold":
-                continue
-            if self.inventory.add(item):
-                self.msg(f"You take {item.name} from the chest.", "item")
-            else:
-                self._drop_item_near(item, chest.x, chest.y)
-                self.msg(
-                    f"Your pack is full; {item.name} drops to the floor.",
-                    "warn",
-                )
+    def close_chest(self) -> None:
+        if self.mode == MODE_CHEST:
+            self.mode = MODE_PLAYING
+        self.active_chest = None
+
+    def take_from_chest(self, index: int) -> bool:
+        chest = self.active_chest
+        if chest is None or not (0 <= index < len(chest.items)):
+            return False
+        item = chest.items[index]
+        if item.kind == "gold":
+            self.gold += item.value
+            chest.items.pop(index)
+            self.msg(
+                f"You take {item.value} gold from the chest.",
+                "gold",
+            )
+        else:
+            if not self.inventory.add(item):
+                self.msg("Your pack is full.", "warn")
+                return False
+            chest.items.pop(index)
+            self.msg(f"You take {item.name} from the chest.", "item")
+        if not chest.items:
+            self.chests.remove(chest)
+            self.msg("The chest is empty.", "item")
+            self.close_chest()
+        return True
 
     def _spring_chest_trap(self) -> None:
         if random.random() < 0.5:
@@ -415,31 +448,6 @@ class Game:
             f"Poison gas escapes the chest! ({self.poison_turns} turns)",
             "warn",
         )
-
-    def _drop_item_near(self, item: Item, x: int, y: int) -> None:
-        player_pos = (
-            (self.player.x, self.player.y) if self.player is not None else None
-        )
-        spots = [(x, y)]
-        for dy in range(-2, 3):
-            for dx in range(-2, 3):
-                if dx == 0 and dy == 0:
-                    continue
-                spots.append((x + dx, y + dy))
-        for px, py in spots:
-            if not self.walkable(px, py):
-                continue
-            if (px, py) == self.stairs or (px, py) == player_pos:
-                continue
-            if self.chest_at(px, py) or self.enemy_at(px, py):
-                continue
-            if self.item_at(px, py):
-                continue
-            item.x, item.y = px, py
-            self.items.append(item)
-            return
-        item.x, item.y = x, y
-        self.items.append(item)
 
     def _spawn_enemies(self) -> None:
         num = 3 + self.depth
@@ -757,8 +765,8 @@ class Game:
             return
         chest = self.chest_at(nx, ny)
         if chest:
-            self.open_chest(chest)
-            self.player_acted()
+            if self.open_chest(chest):
+                self.player_acted()
             return
         if not self.walkable(nx, ny):
             return

@@ -11,6 +11,7 @@ from tcod.event import KeySym
 
 from constants import (
     LOG_H,
+    MODE_CHEST,
     MODE_MENU,
     SCREEN_H,
     SCREEN_W,
@@ -180,6 +181,8 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return _handle_inventory(game, event)
     if game.mode == "trash":
         return _handle_trash(game, event)
+    if game.mode == MODE_CHEST:
+        return _handle_chest(game, event)
 
     sym = event.sym
     if sym in (KeySym.Q,):
@@ -298,6 +301,22 @@ def _handle_trash(game: Game, event: tcod.event.KeyDown) -> bool:
         idx = ord(letter) - ord("a")
         if idx < len(game.trash_items):
             game.take_from_trash(idx)
+        else:
+            game.msg("No item in that slot.")
+    return False
+
+
+def _handle_chest(game: Game, event: tcod.event.KeyDown) -> bool:
+    sym = event.sym
+    if sym in (KeySym.ESCAPE, KeySym.TAB):
+        game.close_chest()
+        return False
+    letter = _letter(event)
+    if letter:
+        chest = game.active_chest
+        idx = ord(letter) - ord("a")
+        if chest is not None and idx < len(chest.items):
+            game.take_from_chest(idx)
         else:
             game.msg("No item in that slot.")
     return False

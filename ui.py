@@ -40,6 +40,7 @@ from constants import (
     MAP_H,
     MAP_W,
     MAX_DEPTH,
+    MODE_CHEST,
     MODE_MENU,
     SCREEN_H,
     SCREEN_W,
@@ -57,7 +58,7 @@ HELP_ROWS = [
     ("Inventory", "i, then a-z to use / equip"),
     ("Throw away", "in inventory: Del, then a-z (at the bin)"),
     ("Trash", "stand on '%' and press Tab (may hold loot)"),
-    ("Chests", "walk into '=' to open; some are trapped"),
+    ("Chests", "walk into '='; a-z take, Esc close"),
     ("Vaults", "gold/red rooms hide chests and guards"),
     ("Descend", "stand on '>' and press > or Enter"),
     ("Log", "PgUp / PgDn, or - / ="),
@@ -120,6 +121,8 @@ def render(console: tcod.console.Console, game: Game) -> None:
         _render_inventory(console, game)
     elif game.mode == "trash":
         _render_trash(console, game)
+    elif game.mode == MODE_CHEST:
+        _render_chest(console, game)
 
 
 def _special_floor_color(kind: str | None) -> tuple[int, int, int] | None:
@@ -421,6 +424,49 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
         x0 + 2,
         y0 + height - 2,
         "a-h take   ESC close"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_PANEL,
+    )
+
+
+def _render_chest(console: tcod.console.Console, game: Game) -> None:
+    chest = game.active_chest
+    if chest is None:
+        return
+    width = min(MAP_W - 4, 50)
+    height = min(MAP_H, max(7, len(chest.items) + 5))
+    x0 = max(1, (MAP_W - width) // 2)
+    y0 = max(1, (MAP_H - height) // 2)
+    frame_color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=f" {'Guarded ' if chest.guarded else ''}Chest {len(chest.items)} ",
+        fg=frame_color,
+        bg=COLOR_PANEL,
+        clear=True,
+    )
+    if not chest.items:
+        console.print(
+            x0 + 2, y0 + 2, "(empty)", fg=COLOR_DIM, bg=COLOR_PANEL
+        )
+    else:
+        for i, item in enumerate(chest.items):
+            letter = chr(ord("a") + i)
+            fg = COLOR_GOLD if item.kind == "gold" else item.color
+            console.print(
+                x0 + 2,
+                y0 + 2 + i,
+                f" {letter}) {game.inventory.label(item)}"[: width - 4],
+                fg=fg,
+                bg=COLOR_PANEL,
+            )
+    console.print(
+        x0 + 2,
+        y0 + height - 2,
+        "a-z take   ESC close"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
