@@ -58,7 +58,7 @@ HELP_ROWS = [
     ("Pick up", "walk over an item (gold auto)"),
     ("Inventory", "Tab, then a-z to use / equip"),
     ("Interact", "i: chest / trash nearby"),
-    ("Throw away", "in inventory: Del, then a-z (next to the bin)"),
+    ("Throw away", "in trash menu: Del, then a-z"),
     ("Trash", "stand next to '%' and press i"),
     ("Chests", "i near '=': a-z take, Del put"),
     ("Vaults", "gold/red rooms hide chests and guards"),
@@ -378,22 +378,26 @@ def _render_inventory(console: tcod.console.Console, game: Game) -> None:
                 bg=COLOR_PANEL,
             )
 
-    if game.discard_mode:
-        hint = "Throw away: choose a slot a-z   ESC cancel"
-    elif game.near_trash():
-        hint = "a-z use/equip   Del throw away   Tab/Esc close"
-    else:
-        hint = "a-z use/equip   Del throw away (stand next to %)   Tab/Esc close"
+    hint = "a-z use/equip   Tab/Esc close"
     console.print(
         x0 + 2,
         y0 + height - 2,
         hint[: width - 4],
-        fg=COLOR_WARN if game.discard_mode else COLOR_DIM,
+        fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
 
 
 def _render_trash(console: tcod.console.Console, game: Game) -> None:
+    if game.trash_deposit_mode:
+        _render_container_deposit(
+            console,
+            game,
+            " Put into trash "
+            f"(pack {len(game.inventory.items)}/{game.inventory.capacity}) ",
+            COLOR_TRASH,
+        )
+        return
     width = min(MAP_W - 4, 50)
     height = min(MAP_H, TRASH_CAPACITY + 5)
     x0 = max(1, (MAP_W - width) // 2)
@@ -425,7 +429,7 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
     console.print(
         x0 + 2,
         y0 + height - 2,
-        "a-h take   ESC close"[: width - 4],
+        "a-h take   Del put   ESC close"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
@@ -436,7 +440,13 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
     if chest is None:
         return
     if game.chest_deposit_mode:
-        _render_chest_deposit(console, game)
+        _render_container_deposit(
+            console,
+            game,
+            " Put into chest "
+            f"(pack {len(game.inventory.items)}/{game.inventory.capacity}) ",
+            COLOR_CHEST,
+        )
         return
     width = min(MAP_W - 4, 50)
     height = min(MAP_H, max(7, len(chest.items) + 5))
@@ -487,8 +497,13 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
     )
 
 
-def _render_chest_deposit(console: tcod.console.Console, game: Game) -> None:
-    """Выбор предмета из рюкзака, чтобы положить его в сундук."""
+def _render_container_deposit(
+    console: tcod.console.Console,
+    game: Game,
+    title: str,
+    frame_color: tuple[int, int, int],
+) -> None:
+    """Выбор предмета из рюкзака, чтобы положить его в контейнер."""
     inventory = game.inventory
     width = min(MAP_W - 4, 50)
     height = min(MAP_H, max(9, len(inventory.items) + 6))
@@ -499,8 +514,8 @@ def _render_chest_deposit(console: tcod.console.Console, game: Game) -> None:
         y0,
         width,
         height,
-        title=f" Put into chest (pack {len(inventory.items)}/{inventory.capacity}) ",
-        fg=COLOR_CHEST,
+        title=title[: width - 2],
+        fg=frame_color,
         bg=COLOR_PANEL,
         clear=True,
     )

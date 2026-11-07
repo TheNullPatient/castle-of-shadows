@@ -259,22 +259,7 @@ def _handle_menu(game: Game, event: tcod.event.KeyDown) -> bool:
 def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
     if sym in (KeySym.ESCAPE, KeySym.TAB):
-        if game.discard_mode:
-            game.discard_mode = False
-        else:
-            game.mode = "playing"
-        return False
-    if game.discard_mode:
-        letter = _letter(event)
-        if letter:
-            idx = game.inventory.letter_index(letter)
-            if idx is None:
-                game.msg("No item in that slot.")
-                return False
-            game.discard_item(idx)
-        return False
-    if sym in (KeySym.DELETE, KeySym.BACKSPACE):
-        game.discard_mode = True
+        game.mode = "playing"
         return False
     letter = _letter(event)
     if letter:
@@ -283,7 +268,6 @@ def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
             game.msg("No item in that slot.")
             return False
         if game.use_inventory(idx) and game.mode == "inventory":
-            game.discard_mode = False
             game.mode = "playing"
     return False
 
@@ -291,7 +275,23 @@ def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
 def _handle_trash(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
     if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
-        game.mode = "playing"
+        if game.trash_deposit_mode:
+            game.trash_deposit_mode = False
+        else:
+            game.close_trash()
+        return False
+    if game.trash_deposit_mode:
+        letter = _letter(event)
+        if letter:
+            idx = game.inventory.letter_index(letter)
+            if idx is None:
+                game.msg("No item in that slot.")
+                return False
+            game.put_in_trash(idx)
+            game.trash_deposit_mode = False
+        return False
+    if sym in (KeySym.DELETE, KeySym.BACKSPACE):
+        game.trash_deposit_mode = True
         return False
     letter = _letter(event)
     if letter:

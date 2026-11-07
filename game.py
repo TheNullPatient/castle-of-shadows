@@ -140,13 +140,13 @@ class Game:
         self.trash_pos: tuple[int, int] | None = None
         self.trash_items: list[Item] = []
         self.trash_noticed = False
+        self.trash_deposit_mode = False
         self.chests: list[Chest] = []
         self.active_chest: Chest | None = None
         self.chest_deposit_mode = False
         self.chest_hinted = False
         self.special_rooms: list[tuple[int, int, int, int, str]] = []
         self.special_room_seen: set[tuple[int, int, int, int]] = set()
-        self.discard_mode = False
         self.visible = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.explored = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.dungeon: Dungeon
@@ -204,6 +204,7 @@ class Game:
         self.special_room_seen = set()
         self.trash_items = []
         self.trash_noticed = False
+        self.trash_deposit_mode = False
         self.trash_pos = self._place_trash()
         self._prepare_special_rooms()
         self._spawn_enemies()
@@ -387,10 +388,6 @@ class Game:
 
     def open_chest(self, chest: Chest) -> bool:
         """Открыть сундук и показать содержимое в отдельном меню."""
-        if not chest.items:
-            self.chests.remove(chest)
-            self.msg("The chest is empty.", "warn")
-            return False
         self.active_chest = chest
         self.chest_deposit_mode = False
         if not chest.opened:
@@ -437,9 +434,7 @@ class Game:
             chest.items.pop(index)
             self.msg(f"You take {item.name} from the chest.", "item")
         if not chest.items:
-            self.chests.remove(chest)
-            self.msg("The chest is empty.", "item")
-            self.close_chest()
+            self.msg("The chest is now empty.", "item")
         return True
 
     def put_in_chest(self, index: int) -> bool:
@@ -893,7 +888,7 @@ class Game:
     def near_trash(self) -> bool:
         return self.on_trash() or self.trash_nearby()
 
-    def discard_item(self, index: int) -> bool:
+    def put_in_trash(self, index: int) -> bool:
         """Выбросить предмет из рюкзака в мусорку рядом."""
         if not (0 <= index < len(self.inventory.items)):
             return False
@@ -922,8 +917,13 @@ class Game:
         if not self.near_trash():
             self.msg("There is no trash bin nearby.", "warn")
             return
-        self.discard_mode = False
+        self.trash_deposit_mode = False
         self.mode = MODE_TRASH
+
+    def close_trash(self) -> None:
+        if self.mode == MODE_TRASH:
+            self.mode = MODE_PLAYING
+        self.trash_deposit_mode = False
 
     def take_from_trash(self, index: int) -> bool:
         if not (0 <= index < len(self.trash_items)):
@@ -1149,7 +1149,8 @@ class Game:
         self.win = win
         self.quit_requested = quit_requested
         self.game_over = True
-        self.discard_mode = False
+        self.trash_deposit_mode = False
+        self.chest_deposit_mode = False
         self.mode = MODE_DEAD
 
     def toggle_help(self) -> None:
@@ -1165,10 +1166,8 @@ class Game:
 
     def toggle_inventory(self) -> None:
         if self.mode == MODE_INVENTORY:
-            self.discard_mode = False
             self.mode = MODE_PLAYING
         elif self.mode == MODE_PLAYING:
-            self.discard_mode = False
             self.mode = MODE_INVENTORY
 
     def restart(self) -> None:
