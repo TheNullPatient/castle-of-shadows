@@ -313,8 +313,8 @@ def _render_hint(console: tcod.console.Console) -> None:
         (" descend · ", COLOR_DIM),
         ("?", COLOR_UI),
         (" help · ", COLOR_DIM),
-        ("Q", COLOR_UI),
-        (" quit", COLOR_DIM),
+        ("Esc", COLOR_UI),
+        (" pause", COLOR_DIM),
     ]
     _print_segments(console, 0, HINT_Y, segments, COLOR_PANEL, SCREEN_W)
 
