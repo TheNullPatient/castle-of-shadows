@@ -128,9 +128,10 @@ class Game:
     MENU_OPTIONS = ("New Game", "How to Play", "Quit")
     PAUSE_OPTIONS = (
         "Resume",
-        "Save & Main Menu",
-        "Abandon Run (Q)",
-        "Quit Game",
+        "Save & Quit to main menu",
+        "Quit to main menu without saving",
+        "Save & Quit to Desktop",
+        "Quit to Desktop without saving",
     )
 
     def __init__(self, build_level: bool = True) -> None:
@@ -308,16 +309,10 @@ class Game:
         """Сохранить текущий этаж и вернуться в главное меню."""
         if self.player is not None and not self.game_over:
             self.save()
-        self.mode = MODE_MENU
-        self.menu_index = 0
-        self.pause_index = 0
+        self.quit_to_menu()
 
-    def abandon_run(self) -> None:
-        """Прекратить забег: удалить его сохранение и выйти в меню."""
-        if self.slot is not None:
-            delete_save(self.slot)
-        self.slot = None
-        self.game_over = True
+    def quit_to_menu(self) -> None:
+        """Вернуться в главное меню, не записывая текущий этаж."""
         self.mode = MODE_MENU
         self.menu_index = 0
         self.pause_index = 0

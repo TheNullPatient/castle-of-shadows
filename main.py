@@ -309,16 +309,18 @@ def _handle_pause(game: Game, event: tcod.event.KeyDown) -> bool:
         choice = options[game.pause_index]
         if choice == "Resume":
             game.close_pause()
-        elif choice == "Save & Main Menu":
+        elif choice.startswith("Save & Quit to main"):
             game.return_to_menu()
-        elif choice.startswith("Abandon Run"):
-            game.abandon_run()
-        else:
+        elif choice.startswith("Quit to main"):
+            game.quit_to_menu()
+        elif choice.startswith("Save & Quit to Desktop"):
             game.save()
+            return True
+        else:
             return True
         return False
     if sym == KeySym.Q:
-        game.abandon_run()
+        game.return_to_menu()
         return False
     return False
 
