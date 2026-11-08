@@ -198,9 +198,6 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
     if sym == KeySym.ESCAPE:
         game.open_pause()
         return False
-    if sym in (KeySym.Q,):
-        game.finish(quit_requested=True)
-        return False
     if sym in (KeySym.SLASH,) and _shifted(event):
         game.toggle_help()
         return False
@@ -314,15 +311,15 @@ def _handle_pause(game: Game, event: tcod.event.KeyDown) -> bool:
             game.close_pause()
         elif choice == "Save & Main Menu":
             game.return_to_menu()
-        elif choice == "Abandon Run":
+        elif choice.startswith("Abandon Run"):
             game.abandon_run()
         else:
             game.save()
             return True
         return False
     if sym == KeySym.Q:
-        game.save()
-        return True
+        game.abandon_run()
+        return False
     return False
 
 

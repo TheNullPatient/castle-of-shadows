@@ -68,9 +68,10 @@ HELP_ROWS = [
     ("Descend", "stand on '>' and press > or Enter"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),
-    ("Pause", "Esc: resume, menu, abandon"),
+    ("Pause", "Esc: resume / menu / abandon"),
+    ("Abandon", "Q in the pause menu"),
     ("Saves", "5 slots; Continue in the menu"),
-    ("Quit", "Q or the pause menu"),
+    ("Quit", "pause menu: Quit Game"),
     ("Restart", "R (on the death screen)"),
     ("", ""),
     ("Health", "slow regen; floors/levels heal partly"),
@@ -626,7 +627,7 @@ def _render_pause(console: tcod.console.Console, game: Game) -> None:
     console.print(
         x0 + 2,
         y0 + height - 2,
-        "W/S select   Enter confirm   Esc resume"[: width - 4],
+        "W/S select  Enter  Esc resume  Q abandon"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )

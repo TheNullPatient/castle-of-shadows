@@ -129,7 +129,7 @@ class Game:
     PAUSE_OPTIONS = (
         "Resume",
         "Save & Main Menu",
-        "Abandon Run",
+        "Abandon Run (Q)",
         "Quit Game",
     )
 
