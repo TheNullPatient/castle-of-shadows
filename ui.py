@@ -39,8 +39,6 @@ from constants import (
     HINT_Y,
     LOG_H,
     LOG_Y,
-    MAP_H,
-    MAP_W,
     MAX_DEPTH,
     MODE_CHEST,
     MODE_MENU,
@@ -51,6 +49,8 @@ from constants import (
     STATUS_Y,
     TRASH_CAPACITY,
     TRASH_CHAR,
+    VIEW_H,
+    VIEW_W,
 )
 from game import MSG_COLORS, Game
 
@@ -66,6 +66,8 @@ HELP_ROWS = [
     ("Chests", "i near '=': a-z take, Del put"),
     ("Vaults", "gold/red rooms hide chests and guards"),
     ("Descend", "stand on '>' and press > or Enter"),
+    ("Map", "floors are larger than the screen"),
+    ("Camera", "follows you; stairs lie far away"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),
     ("Pause", "Esc: menu and desktop options"),
@@ -149,16 +151,24 @@ def _special_floor_color(kind: str | None) -> tuple[int, int, int] | None:
 
 def _render_map(console: tcod.console.Console, game: Game) -> None:
     grid = game.dungeon.grid
-    for y in range(MAP_H):
-        for x in range(MAP_W):
-            ch = grid[y][x]
-            visible = game.is_visible(x, y)
-            explored = game.is_explored(x, y)
+    left, top = game.camera()
+    for sy in range(VIEW_H):
+        wy = top + sy
+        if not 0 <= wy < game.dungeon.h:
+            continue
+        row = grid[wy]
+        for sx in range(VIEW_W):
+            wx = left + sx
+            if not 0 <= wx < game.dungeon.w:
+                continue
+            ch = row[wx]
+            visible = game.is_visible(wx, wy)
+            explored = game.is_explored(wx, wy)
             if not visible and not explored:
                 continue
-            special = _special_floor_color(game.special_room_at(x, y))
+            special = _special_floor_color(game.special_room_at(wx, wy))
             if visible:
-                light = _light(game, x, y)
+                light = _light(game, wx, wy)
                 if ch == "#":
                     fg = _tint(COLOR_WALL, light)
                 elif ch == ">":
@@ -167,7 +177,7 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     fg = _tint(COLOR_TRASH, 0.75 + light * 0.25)
                 else:
                     fg = _tint(special or COLOR_FLOOR, light)
-                bg = _warm_glow(game, x, y)
+                bg = _warm_glow(game, wx, wy)
             else:
                 if ch == "#":
                     fg = COLOR_WALL_DARK
@@ -180,25 +190,26 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                 else:
                     fg = COLOR_FLOOR_DARK
                 bg = COLOR_BG
-            _put(console, x, y, ch, fg, bg)
+            _put(console, sx, sy, ch, fg, bg)
 
 
 def _render_entities(console: tcod.console.Console, game: Game) -> None:
+    left, top = game.camera()
     for chest in game.chests:
         if game.is_visible(chest.x, chest.y):
             color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
-            _put(console, chest.x, chest.y, CHEST_CHAR, color)
+            _put(console, chest.x - left, chest.y - top, CHEST_CHAR, color)
     for item in game.items:
         if game.is_visible(item.x, item.y):
-            _put(console, item.x, item.y, item.char, item.color)
+            _put(console, item.x - left, item.y - top, item.char, item.color)
     for enemy in game.enemies:
         if not game.is_visible(enemy.x, enemy.y):
             continue
         ratio = max(0.2, enemy.hp / enemy.max_hp)
         color = _tint(enemy.color, 0.62 + ratio * 0.38)
-        _put(console, enemy.x, enemy.y, enemy.char, color)
+        _put(console, enemy.x - left, enemy.y - top, enemy.char, color)
     player = game.player
-    _put(console, player.x, player.y, "@", COLOR_PLAYER)
+    _put(console, player.x - left, player.y - top, "@", COLOR_PLAYER)
 
 
 def _print_segments(
@@ -325,8 +336,8 @@ def _render_inventory(
     hint: str | None = None,
 ) -> None:
     inventory = game.inventory
-    width = MAP_W
-    height = MAP_H
+    width = VIEW_W
+    height = VIEW_H
     x0 = 0
     y0 = 0
     frame_title = (
@@ -420,10 +431,10 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
             hint="a-z put   ESC cancel",
         )
         return
-    width = min(MAP_W - 4, 50)
-    height = min(MAP_H, TRASH_CAPACITY + 5)
-    x0 = max(1, (MAP_W - width) // 2)
-    y0 = max(1, (MAP_H - height) // 2)
+    width = min(VIEW_W - 4, 50)
+    height = min(VIEW_H, TRASH_CAPACITY + 5)
+    x0 = max(1, (VIEW_W - width) // 2)
+    y0 = max(1, (VIEW_H - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -470,10 +481,10 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
             hint="a-z put   ESC cancel",
         )
         return
-    width = min(MAP_W - 4, 50)
-    height = min(MAP_H, max(7, len(chest.items) + 5))
-    x0 = max(1, (MAP_W - width) // 2)
-    y0 = max(1, (MAP_H - height) // 2)
+    width = min(VIEW_W - 4, 50)
+    height = min(VIEW_H, max(7, len(chest.items) + 5))
+    x0 = max(1, (VIEW_W - width) // 2)
+    y0 = max(1, (VIEW_H - height) // 2)
     frame_color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
     console.draw_frame(
         x0,
@@ -590,10 +601,10 @@ def _render_slots(console: tcod.console.Console, game: Game) -> None:
 
 
 def _render_pause(console: tcod.console.Console, game: Game) -> None:
-    width = min(MAP_W - 4, 46)
+    width = min(VIEW_W - 4, 46)
     height = len(game.pause_options()) * 2 + 6
-    x0 = max(1, (MAP_W - width) // 2)
-    y0 = max(1, (MAP_H - height) // 2)
+    x0 = max(1, (VIEW_W - width) // 2)
+    y0 = max(1, (VIEW_H - height) // 2)
     console.draw_frame(
         x0,
         y0,

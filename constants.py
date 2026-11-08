@@ -11,14 +11,18 @@ TILESET_PATH = ASSET_DIR / "dejavu16x16_gs_tc.png"
 TILE_W = 12
 TILE_H = 20
 
-MAP_W, MAP_H = 70, 22
+# Видимая область карты (один «экран») и размер самого этажа. Этаж больше
+# экрана: камера следует за игроком, а FOV и сохранения работают в мировых
+# координатах.
+VIEW_W, VIEW_H = 70, 22
+MAP_W, MAP_H = 140, 60
 STATUS_H = 1
 LOG_H = 9
 HINT_H = 1
-SCREEN_W = MAP_W
-SCREEN_H = MAP_H + STATUS_H + LOG_H + HINT_H
-STATUS_Y = MAP_H
-LOG_Y = MAP_H + STATUS_H
+SCREEN_W = VIEW_W
+SCREEN_H = VIEW_H + STATUS_H + LOG_H + HINT_H
+STATUS_Y = VIEW_H
+LOG_Y = VIEW_H + STATUS_H
 HINT_Y = SCREEN_H - 1
 
 FOV_RADIUS = 11  # радиус обзора; стены на краю подсвечиваются отдельно

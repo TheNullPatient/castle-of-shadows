@@ -12,12 +12,15 @@ class Dungeon:
         self._generate()
 
     def _generate(self) -> None:
-        target = random.randint(5, 8)
+        # Чем больше этаж, тем больше комнат: маленькая карта остаётся
+        # компактной, а большая не превращается в пустое поле.
+        target = max(5, min(36, (self.w * self.h) // 240))
+        max_attempts = max(400, target * 60)
         attempts = 0
-        while len(self.rooms) < target and attempts < 300:
+        while len(self.rooms) < target and attempts < max_attempts:
             attempts += 1
-            w = random.randint(5, 10)
-            h = random.randint(3, 5)
+            w = random.randint(5, 11)
+            h = random.randint(3, 6)
             x = random.randint(1, self.w - w - 1)
             y = random.randint(1, self.h - h - 1)
             new_room = (x, y, w, h)
@@ -32,6 +35,35 @@ class Dungeon:
             fallback = (1, 1, min(9, self.w - 2), min(4, self.h - 2))
             self._carve_room(fallback)
             self.rooms.append(fallback)
+        self._arrange_rooms()
+
+    def _arrange_rooms(self) -> None:
+        """Поставить старт в угол, а лестницу — в самую дальнюю комнату.
+
+        Так на большом этаже игрок действительно исследует карту, а не
+        находит спуск в соседней комнате. Порядок важен: `rooms[0]` — старт,
+        `rooms[-1]` — лестница.
+        """
+        if len(self.rooms) < 2:
+            return
+
+        def center(room: tuple[int, int, int, int]) -> tuple[int, int]:
+            x, y, w, h = room
+            return x + w // 2, y + h // 2
+
+        start = min(self.rooms, key=lambda room: sum(center(room)))
+        sx, sy = center(start)
+        stairs = max(
+            self.rooms,
+            key=lambda room: (
+                abs(center(room)[0] - sx) + abs(center(room)[1] - sy)
+            ),
+        )
+        self.rooms = (
+            [start]
+            + [room for room in self.rooms if room not in (start, stairs)]
+            + [stairs]
+        )
 
     @staticmethod
     def _overlaps(r1, r2) -> bool:

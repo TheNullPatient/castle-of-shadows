@@ -53,6 +53,8 @@ from constants import (
     TRASH_CHAR,
     TRASH_LOOT_CHANCE,
     TRASH_LOOT_MAX,
+    VIEW_H,
+    VIEW_W,
 )
 from dungeon import Dungeon
 from entities import (
@@ -373,7 +375,9 @@ class Game:
         self._spawn_enemies()
         self._spawn_items()
         self._spawn_trash_loot()
-        self.explored = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
+        self.explored = np.zeros(
+            (self.dungeon.w, self.dungeon.h), dtype=bool, order="F"
+        )
         self.update_fov()
 
     def _place_trash(self) -> tuple[int, int] | None:
@@ -423,12 +427,17 @@ class Game:
         if not candidates:
             return
         count = 1
+        if len(rooms) >= 12:
+            count = 2
+        if len(rooms) >= 24 and self.depth >= 3:
+            count = 3
         if (
-            self.depth >= 4
-            and len(candidates) >= 2
+            count < 3
+            and self.depth >= 4
+            and len(candidates) > count
             and random.random() < 0.35
         ):
-            count = 2
+            count += 1
         for idx in random.sample(candidates, min(count, len(candidates))):
             room = rooms[idx]
             kind = random.choices(
@@ -669,7 +678,8 @@ class Game:
         )
 
     def _spawn_enemies(self) -> None:
-        num = 3 + self.depth
+        rooms = len(self.dungeon.rooms)
+        num = 3 + self.depth + max(0, rooms - 6) // 4
         pool = [e for e in ENEMY_TYPES if e[6] <= self.depth // 2 + 1] or [ENEMY_TYPES[0]]
         for _ in range(num):
             pos = self._free_spot()
@@ -679,7 +689,9 @@ class Game:
             self.enemies.append(make_enemy(kind, pos[0], pos[1], self.depth))
 
     def _spawn_items(self) -> None:
-        for _ in range(random.randint(3, 6)):
+        rooms = len(self.dungeon.rooms)
+        count = random.randint(3, 6) + max(0, rooms - 8) // 4
+        for _ in range(count):
             pos = self._free_spot()
             if pos is None:
                 continue
@@ -745,10 +757,11 @@ class Game:
         return bool(self.explored[x, y])
 
     def update_fov(self) -> None:
-        trans = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
-        for y in range(MAP_H):
+        width, height = self.dungeon.w, self.dungeon.h
+        trans = np.zeros((width, height), dtype=bool, order="F")
+        for y in range(height):
             row = self.dungeon.grid[y]
-            for x in range(MAP_W):
+            for x in range(width):
                 trans[x, y] = row[x] != "#"
         self.visible = tcod.map.compute_fov(
             trans,
@@ -759,6 +772,27 @@ class Game:
         )
         self._light_wall_edges()
         self.explored |= self.visible
+
+    def camera(self) -> tuple[int, int]:
+        """Левый верхний угол видимой области карты в мировых координатах."""
+        if self.player is None:
+            return 0, 0
+        width, height = self.dungeon.w, self.dungeon.h
+        if width <= VIEW_W:
+            left = (width - VIEW_W) // 2
+        else:
+            left = min(
+                max(0, self.player.x - VIEW_W // 2),
+                width - VIEW_W,
+            )
+        if height <= VIEW_H:
+            top = (height - VIEW_H) // 2
+        else:
+            top = min(
+                max(0, self.player.y - VIEW_H // 2),
+                height - VIEW_H,
+            )
+        return left, top
 
     def _light_wall_edges(self) -> None:
         """Подсветить стены, примыкающие к видимому полу.
@@ -774,8 +808,8 @@ class Game:
         )
         visible_floors = [
             (x, y)
-            for y in range(MAP_H)
-            for x in range(MAP_W)
+            for y in range(self.dungeon.h)
+            for x in range(self.dungeon.w)
             if self.visible[x, y] and self.dungeon.grid[y][x] != "#"
         ]
         for x, y in visible_floors:
@@ -1106,8 +1140,8 @@ class Game:
 
     def teleport_player(self) -> bool:
         spots: list[tuple[int, int]] = []
-        for y in range(MAP_H):
-            for x in range(MAP_W):
+        for y in range(self.dungeon.h):
+            for x in range(self.dungeon.w):
                 if (
                     self.walkable(x, y)
                     and not self.enemy_at(x, y)
@@ -1121,8 +1155,8 @@ class Game:
         return True
 
     def reveal_map(self) -> None:
-        for y in range(MAP_H):
-            for x in range(MAP_W):
+        for y in range(self.dungeon.h):
+            for x in range(self.dungeon.w):
                 if self.dungeon.grid[y][x] != "#":
                     self.explored[x, y] = True
                     for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
@@ -1162,9 +1196,11 @@ class Game:
         return target.name
 
     def _path_cost(self) -> np.ndarray:
-        cost = np.zeros((MAP_W, MAP_H), dtype=np.int8, order="F")
-        for y in range(MAP_H):
-            for x in range(MAP_W):
+        cost = np.zeros(
+            (self.dungeon.w, self.dungeon.h), dtype=np.int8, order="F"
+        )
+        for y in range(self.dungeon.h):
+            for x in range(self.dungeon.w):
                 if self.dungeon.grid[y][x] != "#":
                     cost[x, y] = 1
         for e in self.enemies:
@@ -1194,7 +1230,8 @@ class Game:
         self._hurt_player(dmg, enemy.name)
 
     def _summon(self, enemy: Entity) -> None:
-        if len(self.enemies) >= MAX_ENEMIES:
+        limit = MAX_ENEMIES + len(self.dungeon.rooms) // 3
+        if len(self.enemies) >= limit:
             self.msg(
                 f"{enemy.name} chants, but the shadows are full.",
                 "warn",
