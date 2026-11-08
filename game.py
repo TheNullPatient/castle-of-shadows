@@ -152,7 +152,7 @@ class Game:
         self.dungeon: Dungeon
         self.new_level(first=True)
         self.msg("Welcome, Hero! Find '>' and descend 10 levels.")
-        self.msg('Press "?" for help. i: inventory. . : wait.')
+        self.msg('Press "?" for help. Tab: inventory. i: interact. .: wait.')
 
     def msg(self, text: str, color: str = "msg") -> None:
         self.log.add(text, color)

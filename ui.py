@@ -308,18 +308,28 @@ def _render_hint(console: tcod.console.Console) -> None:
     _print_segments(console, 0, HINT_Y, segments, COLOR_PANEL, SCREEN_W)
 
 
-def _render_inventory(console: tcod.console.Console, game: Game) -> None:
+def _render_inventory(
+    console: tcod.console.Console,
+    game: Game,
+    title: str | None = None,
+    hint: str | None = None,
+) -> None:
     inventory = game.inventory
     width = MAP_W
     height = MAP_H
     x0 = 0
     y0 = 0
+    frame_title = (
+        title
+        if title is not None
+        else f" Inventory {len(inventory.items)}/{inventory.capacity} "
+    )
     console.draw_frame(
         x0,
         y0,
         width,
         height,
-        title=f" Inventory {len(inventory.items)}/{inventory.capacity} ",
+        title=frame_title,
         fg=COLOR_UI,
         bg=COLOR_PANEL,
         clear=True,
@@ -378,11 +388,13 @@ def _render_inventory(console: tcod.console.Console, game: Game) -> None:
                 bg=COLOR_PANEL,
             )
 
-    hint = "a-z use/equip   Tab/Esc close"
+    hint_text = (
+        hint if hint is not None else "a-z use/equip   Tab/Esc close"
+    )
     console.print(
         x0 + 2,
         y0 + height - 2,
-        hint[: width - 4],
+        hint_text[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
@@ -390,12 +402,12 @@ def _render_inventory(console: tcod.console.Console, game: Game) -> None:
 
 def _render_trash(console: tcod.console.Console, game: Game) -> None:
     if game.trash_deposit_mode:
-        _render_container_deposit(
+        _render_inventory(
             console,
             game,
-            " Put into trash "
+            title=" Put into trash "
             f"(pack {len(game.inventory.items)}/{game.inventory.capacity}) ",
-            COLOR_TRASH,
+            hint="a-z put   ESC cancel",
         )
         return
     width = min(MAP_W - 4, 50)
@@ -440,12 +452,12 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
     if chest is None:
         return
     if game.chest_deposit_mode:
-        _render_container_deposit(
+        _render_inventory(
             console,
             game,
-            " Put into chest "
+            title=" Put into chest "
             f"(pack {len(game.inventory.items)}/{game.inventory.capacity}) ",
-            COLOR_CHEST,
+            hint="a-z put   ESC cancel",
         )
         return
     width = min(MAP_W - 4, 50)
@@ -492,62 +504,6 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
         x0 + 2,
         y0 + height - 2,
         "a-z take   Del put   ESC close"[: width - 4],
-        fg=COLOR_DIM,
-        bg=COLOR_PANEL,
-    )
-
-
-def _render_container_deposit(
-    console: tcod.console.Console,
-    game: Game,
-    title: str,
-    frame_color: tuple[int, int, int],
-) -> None:
-    """Выбор предмета из рюкзака, чтобы положить его в контейнер."""
-    inventory = game.inventory
-    width = min(MAP_W - 4, 50)
-    height = min(MAP_H, max(9, len(inventory.items) + 6))
-    x0 = max(1, (MAP_W - width) // 2)
-    y0 = max(1, (MAP_H - height) // 2)
-    console.draw_frame(
-        x0,
-        y0,
-        width,
-        height,
-        title=title[: width - 2],
-        fg=frame_color,
-        bg=COLOR_PANEL,
-        clear=True,
-    )
-    if not inventory.items:
-        console.print(
-            x0 + 2, y0 + 2, "(pack is empty)", fg=COLOR_DIM, bg=COLOR_PANEL
-        )
-    else:
-        rows_per_column = height - 6
-        columns = 2 if len(inventory.items) > rows_per_column else 1
-        column_width = (
-            (width - 4) // columns - 1 if columns > 1 else width - 4
-        )
-        for i, item in enumerate(inventory.items):
-            column = i // rows_per_column
-            row = i % rows_per_column
-            if column >= columns:
-                break
-            letter = chr(ord("a") + i)
-            equipped = item is inventory.weapon or item is inventory.armor
-            marker = "*" if equipped else " "
-            console.print(
-                x0 + 2 + column * (column_width + 2),
-                y0 + 2 + row,
-                f" {letter}) {marker}{inventory.label(item)}"[:column_width],
-                fg=item.color,
-                bg=COLOR_PANEL,
-            )
-    console.print(
-        x0 + 2,
-        y0 + height - 2,
-        "a-z put   ESC cancel"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
