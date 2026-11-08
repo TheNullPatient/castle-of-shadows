@@ -232,7 +232,9 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
 
 def _handle_menu(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
-    count = len(Game.MENU_OPTIONS)
+    options = game.menu_options()
+    count = len(options)
+    game.menu_index %= count
     if sym in (KeySym.UP, KeySym.W, KeySym.K):
         game.menu_index = (game.menu_index - 1) % count
         return False
@@ -243,8 +245,11 @@ def _handle_menu(game: Game, event: tcod.event.KeyDown) -> bool:
         game.toggle_help()
         return False
     if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
-        choice = Game.MENU_OPTIONS[game.menu_index]
-        if choice == "New Game":
+        choice = options[game.menu_index]
+        if choice == "Continue":
+            if not game.continue_game():
+                game.menu_index = 0
+        elif choice == "New Game":
             game.restart()
         elif choice == "How to Play":
             game.toggle_help()
@@ -351,7 +356,7 @@ def main() -> None:
         ),
     ) as context:
         console = tcod.console.Console(SCREEN_W, SCREEN_H, order="F")
-        game = Game()
+        game = Game(build_level=False)
         needs_fit = True
         settling = False
 

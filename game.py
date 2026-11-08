@@ -65,6 +65,14 @@ from entities import (
     random_loot,
 )
 from inventory import Inventory
+from savegame import (
+    apply_state,
+    build_state,
+    delete_save,
+    has_save,
+    read_save,
+    write_save,
+)
 
 MSG_COLORS = {
     "msg": COLOR_MSG,
@@ -113,7 +121,7 @@ class MessageLog:
 class Game:
     MENU_OPTIONS = ("New Game", "How to Play", "Quit")
 
-    def __init__(self) -> None:
+    def __init__(self, build_level: bool = True) -> None:
         self.mode = MODE_MENU
         self.menu_index = 0
         self.help_return_mode = MODE_MENU
@@ -150,9 +158,39 @@ class Game:
         self.visible = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.explored = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.dungeon: Dungeon
-        self.new_level(first=True)
-        self.msg("Welcome, Hero! Find '>' and descend 10 levels.")
-        self.msg('Press "?" for help. Tab: inventory. i: interact. .: wait.')
+        if build_level:
+            self.new_level(first=True)
+            self.msg("Welcome, Hero! Find '>' and descend 10 levels.")
+            self.msg('Press "?" for help. Tab: inventory. i: interact. .: wait.')
+
+    def menu_options(self) -> tuple[str, ...]:
+        """Пункты главного меню: Continue появляется только при сейве."""
+        if has_save():
+            return ("Continue", "New Game", "How to Play", "Quit")
+        return self.MENU_OPTIONS
+
+    def save(self) -> bool:
+        """Записать текущий забег на диск."""
+        if self.player is None or self.game_over:
+            return False
+        try:
+            write_save(build_state(self))
+        except OSError:
+            self.msg("Could not save the game.", "warn")
+            return False
+        return True
+
+    def continue_game(self) -> bool:
+        """Загрузить сохранённый забег в этот объект Game."""
+        data = read_save()
+        if data is None:
+            return False
+        try:
+            apply_state(self, data)
+        except (KeyError, TypeError, ValueError, IndexError):
+            return False
+        self.mode = MODE_PLAYING
+        return True
 
     def msg(self, text: str, color: str = "msg") -> None:
         self.log.add(text, color)
@@ -1144,6 +1182,7 @@ class Game:
         self.depth += 1
         self.msg(f"You descend to depth {self.depth}.")
         self.new_level()
+        self.save()
 
     def finish(self, win: bool = False, quit_requested: bool = False) -> None:
         self.win = win
@@ -1151,6 +1190,7 @@ class Game:
         self.game_over = True
         self.trash_deposit_mode = False
         self.chest_deposit_mode = False
+        delete_save()
         self.mode = MODE_DEAD
 
     def toggle_help(self) -> None:
@@ -1172,5 +1212,7 @@ class Game:
 
     def restart(self) -> None:
         """Начать новую игру, сохранив тот же объект Game для главного цикла."""
+        delete_save()
         self.__init__()
         self.mode = MODE_PLAYING
+        self.save()

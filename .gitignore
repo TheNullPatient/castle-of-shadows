@@ -11,3 +11,7 @@ venv/
 /Снимок*
 /*.png
 /*.ppm
+
+# Сохранение текущего забега
+/savegame.json
+/savegame.json.tmp

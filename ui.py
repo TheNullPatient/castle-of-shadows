@@ -534,7 +534,7 @@ def _render_menu(console: tcod.console.Console, game: Game) -> None:
         bg=COLOR_BG,
     )
     start_y = y0 + 5
-    for i, label in enumerate(Game.MENU_OPTIONS):
+    for i, label in enumerate(game.menu_options()):
         selected = i == game.menu_index
         text = f"{'>' if selected else ' '} {label}"
         console.print(
