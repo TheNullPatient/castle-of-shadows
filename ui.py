@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime
 
 import tcod.console
 
@@ -43,6 +44,8 @@ from constants import (
     MAX_DEPTH,
     MODE_CHEST,
     MODE_MENU,
+    MODE_PAUSE,
+    MODE_SLOTS,
     SCREEN_H,
     SCREEN_W,
     STATUS_Y,
@@ -65,7 +68,9 @@ HELP_ROWS = [
     ("Descend", "stand on '>' and press > or Enter"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),
-    ("Quit", "Q"),
+    ("Pause", "Esc: resume, menu, abandon"),
+    ("Saves", "5 slots; Continue in the menu"),
+    ("Quit", "Q or the pause menu"),
     ("Restart", "R (on the death screen)"),
     ("", ""),
     ("Health", "slow regen; floors/levels heal partly"),
@@ -108,6 +113,9 @@ def render(console: tcod.console.Console, game: Game) -> None:
     if game.mode == MODE_MENU:
         _render_menu(console, game)
         return
+    if game.mode == MODE_SLOTS:
+        _render_slots(console, game)
+        return
     if game.mode == "help":
         _render_help(console)
         return
@@ -125,6 +133,8 @@ def render(console: tcod.console.Console, game: Game) -> None:
         _render_trash(console, game)
     elif game.mode == MODE_CHEST:
         _render_chest(console, game)
+    elif game.mode == MODE_PAUSE:
+        _render_pause(console, game)
 
 
 def _special_floor_color(kind: str | None) -> tuple[int, int, int] | None:
@@ -504,6 +514,119 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
         x0 + 2,
         y0 + height - 2,
         "a-z take   Del put   ESC close"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_PANEL,
+    )
+
+
+def _slot_label(info: dict | None) -> str:
+    if info is None:
+        return "(empty)"
+    try:
+        when = datetime.fromtimestamp(info["saved_at"]).strftime("%d.%m %H:%M")
+    except (OverflowError, OSError, ValueError):
+        when = "--"
+    return (
+        f"depth {info['depth']:>2}  LV {info['player_level']}  "
+        f"{info['turns']} turns  {info['gold']} gold  {when}"
+    )
+
+
+def _render_slots(console: tcod.console.Console, game: Game) -> None:
+    console.clear(fg=COLOR_UI, bg=COLOR_BG)
+    infos = game.slot_infos()
+    width = min(SCREEN_W - 4, 64)
+    height = min(SCREEN_H - 2, len(infos) + 8)
+    x0 = max(1, (SCREEN_W - width) // 2)
+    y0 = max(1, (SCREEN_H - height) // 2)
+    title = " Continue " if game.slot_action == "continue" else " New Game "
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=title,
+        fg=COLOR_GOLD,
+        bg=COLOR_BG,
+        clear=True,
+    )
+    subtitle = (
+        "Choose a run to continue"
+        if game.slot_action == "continue"
+        else "Choose a slot for the new run"
+    )
+    console.print(
+        x0 + 2, y0 + 1, subtitle[: width - 4], fg=COLOR_DIM, bg=COLOR_BG
+    )
+    start_y = y0 + 3
+    for i, info in enumerate(infos):
+        selected = i == game.slot_index
+        marker = ">" if selected else " "
+        text = f"{marker} {i + 1}) {_slot_label(info)}"
+        fg = COLOR_GOLD if selected else (COLOR_UI if info else COLOR_DIM)
+        console.print(x0 + 2, start_y + i, text[: width - 4], fg=fg, bg=COLOR_BG)
+    if game.slot_confirm_delete is not None:
+        hint = f"Press Del again to delete slot {game.slot_confirm_delete}"
+        hint_color = COLOR_WARN
+    elif game.slot_confirm_overwrite is not None:
+        hint = (
+            "Press Enter again to overwrite slot "
+            f"{game.slot_confirm_overwrite}"
+        )
+        hint_color = COLOR_WARN
+    elif game.slot_action == "continue":
+        hint = "Enter load   Del delete   ESC back"
+        hint_color = COLOR_DIM
+    else:
+        hint = "Enter start   Del delete   ESC back"
+        hint_color = COLOR_DIM
+    console.print(
+        x0 + 2,
+        y0 + height - 2,
+        hint[: width - 4],
+        fg=hint_color,
+        bg=COLOR_BG,
+    )
+
+
+def _render_pause(console: tcod.console.Console, game: Game) -> None:
+    width = min(MAP_W - 4, 46)
+    height = len(game.pause_options()) * 2 + 6
+    x0 = max(1, (MAP_W - width) // 2)
+    y0 = max(1, (MAP_H - height) // 2)
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=" PAUSED ",
+        fg=COLOR_GOLD,
+        bg=COLOR_PANEL,
+        clear=True,
+    )
+    slot = f"slot {game.slot}" if game.slot is not None else "unsaved"
+    console.print(
+        x0 + 2,
+        y0 + 1,
+        f"Depth {game.depth}   {slot}"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_PANEL,
+    )
+    start_y = y0 + 3
+    for i, label in enumerate(game.pause_options()):
+        selected = i == game.pause_index
+        text = f"{'>' if selected else ' '} {label}"
+        console.print(
+            x0 + 2,
+            start_y + i * 2,
+            text[: width - 4],
+            fg=COLOR_GOLD if selected else COLOR_UI,
+            bg=COLOR_PANEL,
+        )
+    console.print(
+        x0 + 2,
+        y0 + height - 2,
+        "W/S select   Enter confirm   Esc resume"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )

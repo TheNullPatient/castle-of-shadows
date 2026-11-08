@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -19,23 +20,50 @@ from constants import (
 from dungeon import Dungeon
 from entities import Chest, Entity, Item
 
-SAVE_PATH = ROOT / "savegame.json"
+SAVE_DIR = ROOT / "saves"
 SAVE_VERSION = 1
+SLOT_COUNT = 5
+
+_LEGACY_MIGRATED = False
 
 
-# --- низкоуровневый доступ к файлу -----------------------------------------
+# --- низкоуровневый доступ к слотам ----------------------------------------
 
 
-def has_save(path: Path | None = None) -> bool:
-    """Есть ли пригодный для загрузки файл сохранения."""
-    return read_save(path) is not None
+def slot_path(slot: int) -> Path:
+    """Путь к файлу слота (1..SLOT_COUNT)."""
+    return SAVE_DIR / f"slot{slot}.json"
 
 
-def read_save(path: Path | None = None) -> dict[str, Any] | None:
-    """Прочитать сохранение. None, если файла нет или он не подходит."""
-    target = path or SAVE_PATH
+def _legacy_path() -> Path:
+    """Старое одиночное сохранение, которое переносим в первый слот."""
+    return SAVE_DIR.parent / "savegame.json"
+
+
+def _ensure_dir() -> None:
+    global _LEGACY_MIGRATED
     try:
-        raw = target.read_text(encoding="utf-8")
+        SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    if _LEGACY_MIGRATED:
+        return
+    _LEGACY_MIGRATED = True
+    legacy = _legacy_path()
+    first = slot_path(1)
+    if legacy.is_file() and not first.exists():
+        try:
+            legacy.replace(first)
+        except OSError:
+            pass
+
+
+def _read_payload(slot: int) -> dict[str, Any] | None:
+    if not 1 <= slot <= SLOT_COUNT:
+        return None
+    _ensure_dir()
+    try:
+        raw = slot_path(slot).read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return None
     try:
@@ -48,14 +76,76 @@ def read_save(path: Path | None = None) -> dict[str, Any] | None:
         return None
     if not isinstance(data.get("state"), dict):
         return None
-    return data["state"]
+    return data
 
 
-def write_save(state: dict[str, Any], path: Path | None = None) -> None:
-    """Атомарно записать сохранение: сначала во временный файл, затем rename."""
-    target = path or SAVE_PATH
-    payload = {"version": SAVE_VERSION, "state": state}
-    tmp = target.with_name(target.name + ".tmp")
+def read_save(slot: int) -> dict[str, Any] | None:
+    """Прочитать сохранение слота. None, если файла нет или он не подходит."""
+    payload = _read_payload(slot)
+    if payload is None:
+        return None
+    state = payload["state"]
+    state["saved_at"] = float(payload.get("saved_at", 0.0))
+    return state
+
+
+def has_save(slot: int) -> bool:
+    """Есть ли пригодное сохранение в слоте."""
+    return read_save(slot) is not None
+
+
+def slot_info(slot: int) -> dict[str, Any] | None:
+    """Краткая информация о слоте для меню."""
+    state = read_save(slot)
+    if state is None:
+        return None
+    stats = state.get("stats", {})
+    return {
+        "slot": slot,
+        "depth": int(state.get("depth", 1)),
+        "turns": int(stats.get("turns", 0)),
+        "player_level": int(stats.get("player_level", 1)),
+        "gold": int(stats.get("gold", 0)),
+        "saved_at": float(state.get("saved_at", 0.0)),
+    }
+
+
+def list_slots() -> list[dict[str, Any] | None]:
+    """Все слоты по порядку; пустой слот — None."""
+    _ensure_dir()
+    return [slot_info(slot) for slot in range(1, SLOT_COUNT + 1)]
+
+
+def has_any_save() -> bool:
+    return any(info is not None for info in list_slots())
+
+
+def first_free_slot() -> int | None:
+    for index, info in enumerate(list_slots(), start=1):
+        if info is None:
+            return index
+    return None
+
+
+def latest_slot() -> int | None:
+    saved = [info for info in list_slots() if info is not None]
+    if not saved:
+        return None
+    return int(max(saved, key=lambda info: info["saved_at"])["slot"])
+
+
+def write_save(slot: int, state: dict[str, Any]) -> None:
+    """Атомарно записать сохранение слота."""
+    if not 1 <= slot <= SLOT_COUNT:
+        raise ValueError(f"invalid save slot: {slot}")
+    _ensure_dir()
+    payload = {
+        "version": SAVE_VERSION,
+        "saved_at": time.time(),
+        "state": state,
+    }
+    target = slot_path(slot)
+    tmp = SAVE_DIR / f".slot{slot}.tmp"
     with tmp.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
         handle.flush()
@@ -63,11 +153,12 @@ def write_save(state: dict[str, Any], path: Path | None = None) -> None:
     os.replace(tmp, target)
 
 
-def delete_save(path: Path | None = None) -> None:
-    """Удалить сохранение, если оно есть."""
-    target = path or SAVE_PATH
+def delete_save(slot: int) -> None:
+    """Удалить сохранение слота, если оно есть."""
+    if not 1 <= slot <= SLOT_COUNT:
+        return
     try:
-        target.unlink()
+        slot_path(slot).unlink()
     except OSError:
         pass
 

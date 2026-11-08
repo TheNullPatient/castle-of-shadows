@@ -115,6 +115,8 @@ COLOR_ENEMY_GOLEM = (150, 150, 150)
 COLOR_ENEMY_DRAGON = (255, 70, 60)
 
 MODE_MENU = "menu"
+MODE_SLOTS = "slots"
+MODE_PAUSE = "pause"
 MODE_PLAYING = "playing"
 MODE_INVENTORY = "inventory"
 MODE_TRASH = "trash"

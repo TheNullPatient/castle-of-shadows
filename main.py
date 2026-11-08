@@ -13,6 +13,8 @@ from constants import (
     LOG_H,
     MODE_CHEST,
     MODE_MENU,
+    MODE_PAUSE,
+    MODE_SLOTS,
     SCREEN_H,
     SCREEN_W,
     TILE_H,
@@ -169,9 +171,17 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
     """Обработать клавишу. True — закрыть окно."""
     if game.mode == MODE_MENU:
         return _handle_menu(game, event)
+    if game.mode == MODE_SLOTS:
+        return _handle_slots(game, event)
+    if game.mode == MODE_PAUSE:
+        return _handle_pause(game, event)
     if game.mode == "dead":
         if event.sym == KeySym.R:
             game.restart()
+            return False
+        if event.sym == KeySym.ESCAPE:
+            game.mode = MODE_MENU
+            game.menu_index = 0
             return False
         return True
     if game.mode == "help":
@@ -185,6 +195,9 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return _handle_chest(game, event)
 
     sym = event.sym
+    if sym == KeySym.ESCAPE:
+        game.open_pause()
+        return False
     if sym in (KeySym.Q,):
         game.finish(quit_requested=True)
         return False
@@ -247,16 +260,68 @@ def _handle_menu(game: Game, event: tcod.event.KeyDown) -> bool:
     if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
         choice = options[game.menu_index]
         if choice == "Continue":
-            if not game.continue_game():
+            if not game.open_slots("continue"):
                 game.menu_index = 0
         elif choice == "New Game":
-            game.restart()
+            game.open_slots("new")
         elif choice == "How to Play":
             game.toggle_help()
         else:
             return True
         return False
     if sym in (KeySym.Q, KeySym.ESCAPE):
+        return True
+    return False
+
+
+def _handle_slots(game: Game, event: tcod.event.KeyDown) -> bool:
+    sym = event.sym
+    if sym in (KeySym.ESCAPE, KeySym.Q):
+        game.close_slots()
+        return False
+    if sym in (KeySym.UP, KeySym.W, KeySym.K):
+        game.slot_move(-1)
+        return False
+    if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+        game.slot_move(1)
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        game.slot_activate()
+        return False
+    if sym in (KeySym.DELETE, KeySym.BACKSPACE):
+        game.slot_delete()
+        return False
+    return False
+
+
+def _handle_pause(game: Game, event: tcod.event.KeyDown) -> bool:
+    sym = event.sym
+    options = game.pause_options()
+    count = len(options)
+    game.pause_index %= count
+    if sym in (KeySym.UP, KeySym.W, KeySym.K):
+        game.pause_index = (game.pause_index - 1) % count
+        return False
+    if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+        game.pause_index = (game.pause_index + 1) % count
+        return False
+    if sym in (KeySym.ESCAPE,):
+        game.close_pause()
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        choice = options[game.pause_index]
+        if choice == "Resume":
+            game.close_pause()
+        elif choice == "Save & Main Menu":
+            game.return_to_menu()
+        elif choice == "Abandon Run":
+            game.abandon_run()
+        else:
+            game.save()
+            return True
+        return False
+    if sym == KeySym.Q:
+        game.save()
         return True
     return False
 

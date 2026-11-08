@@ -12,6 +12,6 @@ venv/
 /*.png
 /*.ppm
 
-# Сохранение текущего забега
+# Сохранения текущих забегов
 /savegame.json
-/savegame.json.tmp
+/saves/

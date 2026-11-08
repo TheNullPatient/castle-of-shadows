@@ -39,7 +39,9 @@ from constants import (
     MODE_HELP,
     MODE_INVENTORY,
     MODE_MENU,
+    MODE_PAUSE,
     MODE_PLAYING,
+    MODE_SLOTS,
     MODE_TRASH,
     POISON_DAMAGE,
     POISON_TURNS,
@@ -66,10 +68,14 @@ from entities import (
 )
 from inventory import Inventory
 from savegame import (
+    SLOT_COUNT,
     apply_state,
     build_state,
     delete_save,
-    has_save,
+    first_free_slot,
+    has_any_save,
+    latest_slot,
+    list_slots,
     read_save,
     write_save,
 )
@@ -120,11 +126,23 @@ class MessageLog:
 
 class Game:
     MENU_OPTIONS = ("New Game", "How to Play", "Quit")
+    PAUSE_OPTIONS = (
+        "Resume",
+        "Save & Main Menu",
+        "Abandon Run",
+        "Quit Game",
+    )
 
     def __init__(self, build_level: bool = True) -> None:
         self.mode = MODE_MENU
         self.menu_index = 0
         self.help_return_mode = MODE_MENU
+        self.slot: int | None = None
+        self.pause_index = 0
+        self.slot_action = "continue"
+        self.slot_index = 0
+        self.slot_confirm_delete: int | None = None
+        self.slot_confirm_overwrite: int | None = None
         self.depth = 1
         self.log = MessageLog()
         self.player: Entity | None = None
@@ -164,33 +182,145 @@ class Game:
             self.msg('Press "?" for help. Tab: inventory. i: interact. .: wait.')
 
     def menu_options(self) -> tuple[str, ...]:
-        """Пункты главного меню: Continue появляется только при сейве."""
-        if has_save():
+        """Пункты главного меню: Continue появляется только при сейвах."""
+        if has_any_save():
             return ("Continue", "New Game", "How to Play", "Quit")
         return self.MENU_OPTIONS
 
+    def slot_infos(self) -> list[dict | None]:
+        return list_slots()
+
+    def open_slots(self, action: str) -> bool:
+        """Открыть список слотов для продолжения или новой игры."""
+        infos = list_slots()
+        if action == "continue" and not any(infos):
+            return False
+        self.slot_action = action
+        self.slot_confirm_delete = None
+        self.slot_confirm_overwrite = None
+        self.mode = MODE_SLOTS
+        if action == "continue":
+            self.slot_index = next(
+                (i for i, info in enumerate(infos) if info is not None),
+                0,
+            )
+        else:
+            self.slot_index = next(
+                (i for i, info in enumerate(infos) if info is None),
+                0,
+            )
+        return True
+
+    def close_slots(self) -> None:
+        self.slot_confirm_delete = None
+        self.slot_confirm_overwrite = None
+        self.mode = MODE_MENU
+        self.menu_index = 0
+
+    def slot_move(self, delta: int) -> None:
+        self.slot_index = (self.slot_index + delta) % SLOT_COUNT
+        self.slot_confirm_delete = None
+        self.slot_confirm_overwrite = None
+
+    def slot_activate(self) -> bool:
+        """Загрузить слот или начать в нём новую игру."""
+        slot = self.slot_index + 1
+        info = self.slot_infos()[self.slot_index]
+        if self.slot_action == "continue":
+            if info is None:
+                return False
+            return self.continue_game(slot)
+        if info is not None and self.slot_confirm_overwrite != slot:
+            self.slot_confirm_overwrite = slot
+            self.slot_confirm_delete = None
+            return False
+        self.start_new_game(slot)
+        return True
+
+    def slot_delete(self) -> bool:
+        """Удалить слот; первый Del только запрашивает подтверждение."""
+        slot = self.slot_index + 1
+        info = self.slot_infos()[self.slot_index]
+        if info is None:
+            return False
+        if self.slot_confirm_delete != slot:
+            self.slot_confirm_delete = slot
+            self.slot_confirm_overwrite = None
+            return False
+        delete_save(slot)
+        self.slot_confirm_delete = None
+        return True
+
     def save(self) -> bool:
-        """Записать текущий забег на диск."""
+        """Записать текущий забег в свой слот (или первый свободный)."""
         if self.player is None or self.game_over:
             return False
+        slot = self.slot if self.slot is not None else first_free_slot()
+        if slot is None:
+            self.msg("All save slots are full.", "warn")
+            return False
+        self.slot = slot
         try:
-            write_save(build_state(self))
+            write_save(slot, build_state(self))
         except OSError:
             self.msg("Could not save the game.", "warn")
             return False
         return True
 
-    def continue_game(self) -> bool:
+    def start_new_game(self, slot: int) -> None:
+        """Начать новый забег в выбранном слоте."""
+        delete_save(slot)
+        self.__init__()
+        self.slot = slot
+        self.mode = MODE_PLAYING
+        self.save()
+
+    def continue_game(self, slot: int | None = None) -> bool:
         """Загрузить сохранённый забег в этот объект Game."""
-        data = read_save()
+        if slot is None:
+            slot = latest_slot()
+        if slot is None:
+            return False
+        data = read_save(slot)
         if data is None:
             return False
         try:
             apply_state(self, data)
         except (KeyError, TypeError, ValueError, IndexError):
             return False
+        self.slot = slot
         self.mode = MODE_PLAYING
         return True
+
+    def open_pause(self) -> None:
+        if self.mode == MODE_PLAYING:
+            self.pause_index = 0
+            self.mode = MODE_PAUSE
+
+    def close_pause(self) -> None:
+        if self.mode == MODE_PAUSE:
+            self.mode = MODE_PLAYING
+
+    def pause_options(self) -> tuple[str, ...]:
+        return self.PAUSE_OPTIONS
+
+    def return_to_menu(self) -> None:
+        """Сохранить текущий этаж и вернуться в главное меню."""
+        if self.player is not None and not self.game_over:
+            self.save()
+        self.mode = MODE_MENU
+        self.menu_index = 0
+        self.pause_index = 0
+
+    def abandon_run(self) -> None:
+        """Прекратить забег: удалить его сохранение и выйти в меню."""
+        if self.slot is not None:
+            delete_save(self.slot)
+        self.slot = None
+        self.game_over = True
+        self.mode = MODE_MENU
+        self.menu_index = 0
+        self.pause_index = 0
 
     def msg(self, text: str, color: str = "msg") -> None:
         self.log.add(text, color)
@@ -1190,7 +1320,8 @@ class Game:
         self.game_over = True
         self.trash_deposit_mode = False
         self.chest_deposit_mode = False
-        delete_save()
+        if self.slot is not None:
+            delete_save(self.slot)
         self.mode = MODE_DEAD
 
     def toggle_help(self) -> None:
@@ -1211,8 +1342,9 @@ class Game:
             self.mode = MODE_INVENTORY
 
     def restart(self) -> None:
-        """Начать новую игру, сохранив тот же объект Game для главного цикла."""
-        delete_save()
+        """Начать новый забег в том же слоте после смерти."""
+        slot = self.slot if self.slot is not None else first_free_slot()
         self.__init__()
+        self.slot = slot
         self.mode = MODE_PLAYING
         self.save()
