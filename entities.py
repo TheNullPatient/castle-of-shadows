@@ -14,6 +14,7 @@ from constants import (
     COLOR_ENEMY_GOLEM,
     COLOR_ENEMY_ORC,
     COLOR_ENEMY_RAT,
+    COLOR_ENEMY_SHADOW,
     COLOR_ENEMY_SKELETON,
     COLOR_ENEMY_SPIDER,
     COLOR_ENEMY_TROLL,
@@ -45,6 +46,7 @@ class Entity:
     speed: int = 100
     behavior: str = "melee"
     cooldown: int = 0
+    boss: bool = False
 
     def alive(self) -> bool:
         return self.hp > 0
@@ -138,6 +140,23 @@ ENEMY_COLORS = {
 
 ENEMY_BY_NAME = {kind[1]: kind for kind in ENEMY_TYPES}
 
+# Боссы биомов: появляются на этажах 5, 10, 15, 20 и 25 и охраняют лестницу.
+BOSS_TYPES = [
+    ("K", "Skeleton King", 45, 8, 3, 35, 5, "summoner"),
+    ("T", "Troll Chieftain", 65, 11, 4, 55, 6, "melee"),
+    ("W", "Wyvern", 85, 13, 4, 75, 7, "melee"),
+    ("L", "Lich", 105, 14, 5, 100, 8, "summoner"),
+    ("X", "Shadow Lord", 140, 16, 6, 150, 9, "ranged"),
+]
+
+BOSS_COLORS = {
+    "Skeleton King": COLOR_ENEMY_SKELETON,
+    "Troll Chieftain": COLOR_ENEMY_TROLL,
+    "Wyvern": COLOR_ENEMY_DRAGON,
+    "Lich": COLOR_ENEMY_CULTIST,
+    "Shadow Lord": COLOR_ENEMY_SHADOW,
+}
+
 WEAPON_TABLE = [
     Item(
         "Dagger", ")", "weapon", COLOR_WEAPON, value=1, slot="weapon",
@@ -159,6 +178,14 @@ WEAPON_TABLE = [
         "Warhammer", ")", "weapon", COLOR_WEAPON, value=4, slot="weapon",
         max_durability=40,
     ),
+    Item(
+        "Runed Blade", ")", "weapon", COLOR_WEAPON, value=5, slot="weapon",
+        max_durability=90,
+    ),
+    Item(
+        "Dragonfang", ")", "weapon", COLOR_WEAPON, value=6, slot="weapon",
+        max_durability=120,
+    ),
 ]
 
 ARMOR_TABLE = [
@@ -173,6 +200,14 @@ ARMOR_TABLE = [
     Item(
         "Plate Mail", "[", "armor", COLOR_ARMOR, value=4, slot="armor",
         max_durability=70,
+    ),
+    Item(
+        "Mithril Plate", "[", "armor", COLOR_ARMOR, value=5, slot="armor",
+        max_durability=110,
+    ),
+    Item(
+        "Dragonscale", "[", "armor", COLOR_ARMOR, value=6, slot="armor",
+        max_durability=140,
     ),
 ]
 
@@ -234,16 +269,38 @@ def make_enemy(kind: tuple, x: int, y: int, depth: int) -> Entity:
     )
 
 
+def make_boss(kind: tuple, x: int, y: int, depth: int) -> Entity:
+    """Босс биома: заметно крепче обычных врагов и всегда помечен."""
+    ch, name, hp, atk, df, xp, _tier, behavior = kind
+    hp += depth * 2
+    atk += depth // 2
+    color = BOSS_COLORS.get(name, COLOR_ENEMY)
+    return Entity(
+        x, y, ch, name, hp, hp, atk, df, color, xp + depth * 2,
+        speed=100, behavior=behavior, boss=True,
+    )
+
+
 def _weapon_pool(depth: int) -> list[Item]:
     if depth < 4:
         return WEAPON_TABLE[:3]
-    if depth < 6:
-        return WEAPON_TABLE[1:4]
-    return WEAPON_TABLE[2:]
+    if depth < 10:
+        return WEAPON_TABLE[1:5]
+    if depth < 16:
+        return WEAPON_TABLE[2:6]
+    if depth < 22:
+        return WEAPON_TABLE[3:7]
+    return WEAPON_TABLE[4:]
 
 
 def _armor_pool(depth: int) -> list[Item]:
-    return ARMOR_TABLE[:2] if depth < 5 else ARMOR_TABLE[1:]
+    if depth < 5:
+        return ARMOR_TABLE[:2]
+    if depth < 10:
+        return ARMOR_TABLE[1:3]
+    if depth < 16:
+        return ARMOR_TABLE[2:4]
+    return ARMOR_TABLE[3:]
 
 
 def random_loot(x: int, y: int, depth: int) -> Item:

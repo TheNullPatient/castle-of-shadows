@@ -226,6 +226,7 @@ def entity_to_dict(entity: Entity) -> dict[str, Any]:
         "speed": entity.speed,
         "behavior": entity.behavior,
         "cooldown": entity.cooldown,
+        "boss": entity.boss,
     }
 
 
@@ -244,6 +245,7 @@ def entity_from_dict(data: dict[str, Any]) -> Entity:
         speed=int(data.get("speed", 100)),
         behavior=str(data.get("behavior", "melee")),
         cooldown=int(data.get("cooldown", 0)),
+        boss=bool(data.get("boss", False)),
     )
 
 

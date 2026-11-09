@@ -26,7 +26,32 @@ LOG_Y = VIEW_H + STATUS_H
 HINT_Y = SCREEN_H - 1
 
 FOV_RADIUS = 11  # радиус обзора; стены на краю подсвечиваются отдельно
-MAX_DEPTH = 10
+MAX_DEPTH = 25
+
+# Биомы: каждые пять этажей меняются имена и цвета стен/пола. Боссы стоят
+# на последнем этаже каждого биома (5, 10, 15, 20, 25).
+BIOME_SIZE = 5
+BIOME_NAMES = (
+    "Dungeon Halls",
+    "Flooded Crypts",
+    "Ember Forges",
+    "Frozen Vaults",
+    "Shadow Sanctum",
+)
+BIOME_COLORS = (
+    ((135, 135, 155), (92, 92, 108)),
+    ((85, 125, 145), (55, 85, 105)),
+    ((165, 95, 75), (110, 62, 48)),
+    ((155, 180, 205), (95, 120, 150)),
+    ((125, 90, 145), (70, 52, 88)),
+)
+
+
+def biome_index(depth: int) -> int:
+    """Индекс биома для глубины (0..len(BIOME_NAMES)-1)."""
+    return max(0, min(len(BIOME_NAMES) - 1, (depth - 1) // BIOME_SIZE))
+
+
 INVENTORY_CAPACITY = 26  # a-z
 FIRE_RADIUS = 3
 FIRE_DAMAGE = 12
@@ -117,6 +142,7 @@ COLOR_ENEMY_CULTIST = (200, 80, 170)
 COLOR_ENEMY_TROLL = (175, 105, 220)
 COLOR_ENEMY_GOLEM = (150, 150, 150)
 COLOR_ENEMY_DRAGON = (255, 70, 60)
+COLOR_ENEMY_SHADOW = (175, 85, 255)
 
 MODE_MENU = "menu"
 MODE_SLOTS = "slots"

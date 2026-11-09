@@ -10,6 +10,8 @@ from tcod.constants import FOV_SYMMETRIC_SHADOWCAST
 
 from constants import (
     AGGRO_RANGE,
+    BIOME_NAMES,
+    biome_index,
     CHEST_CAPACITY,
     CHEST_TRAP_BONUS_GUARDED,
     CHEST_TRAP_CHANCE,
@@ -58,11 +60,13 @@ from constants import (
 )
 from dungeon import Dungeon
 from entities import (
+    BOSS_TYPES,
     ENEMY_BY_NAME,
     ENEMY_TYPES,
     Chest,
     Entity,
     Item,
+    make_boss,
     make_chest_loot,
     make_enemy,
     make_player,
@@ -181,7 +185,9 @@ class Game:
         self.dungeon: Dungeon
         if build_level:
             self.new_level(first=True)
-            self.msg("Welcome, Hero! Find '>' and descend 10 levels.")
+            self.msg(
+                f"Welcome, Hero! Find '>' and descend {MAX_DEPTH} levels."
+            )
             self.msg('Press "?" for help. Tab: inventory. i: interact. .: wait.')
 
     def menu_options(self) -> tuple[str, ...]:
@@ -375,6 +381,12 @@ class Game:
         self._spawn_enemies()
         self._spawn_items()
         self._spawn_trash_loot()
+        self._spawn_boss()
+        if not first and biome_index(self.depth) != biome_index(self.depth - 1):
+            self.msg(
+                f"You enter the {BIOME_NAMES[biome_index(self.depth)]}.",
+                "good",
+            )
         self.explored = np.zeros(
             (self.dungeon.w, self.dungeon.h), dtype=bool, order="F"
         )
@@ -713,6 +725,21 @@ class Game:
                 )
             )
 
+    def _spawn_boss(self) -> None:
+        """На каждом пятом этаже поставить босса биома к лестнице."""
+        if self.depth % 5 != 0:
+            return
+        index = min(len(BOSS_TYPES) - 1, self.depth // 5 - 1)
+        room = self.dungeon.rooms[-1]
+        pos = self._free_spot_in_room(room)
+        if pos is None:
+            pos = self._spot_near(self.stairs[0], self.stairs[1], 3)
+        if pos is None:
+            return
+        boss = make_boss(BOSS_TYPES[index], pos[0], pos[1], self.depth)
+        self.enemies.append(boss)
+        self.msg(f"{boss.name} guards the stairs!", "enemy")
+
     def _free_spot(self) -> tuple[int, int] | None:
         rooms = [
             room
@@ -854,6 +881,17 @@ class Game:
         self.kills += 1
         self.player_xp += enemy.xp
         self.msg(f"{enemy.name} dies! (+{enemy.xp} XP)")
+        if enemy.boss:
+            gold = random.randint(
+                20 + self.depth * 5,
+                40 + self.depth * 8,
+            )
+            self.gold += gold
+            self.msg(
+                f"You loot {gold} gold from the {enemy.name}.",
+                "gold",
+            )
+            self.items.append(random_loot(enemy.x, enemy.y, self.depth))
         self._check_level_up()
 
     def _hurt_player(
@@ -1336,6 +1374,13 @@ class Game:
     def descend(self) -> None:
         if (self.player.x, self.player.y) != self.stairs:
             self.msg('You must stand on ">" to descend.')
+            return
+        boss = next((enemy for enemy in self.enemies if enemy.boss), None)
+        if boss is not None:
+            self.msg(
+                f"The stairs are sealed until {boss.name} falls!",
+                "warn",
+            )
             return
         if self.depth >= MAX_DEPTH:
             self.msg("*** You escape the Castle of Shadows! VICTORY! ***", "good")

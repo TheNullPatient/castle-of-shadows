@@ -9,13 +9,14 @@ import tcod.console
 from constants import (
     CHEST_CAPACITY,
     CHEST_CHAR,
+    BIOME_COLORS,
+    BIOME_NAMES,
+    biome_index,
     COLOR_BG,
     COLOR_CAMP_FLOOR,
     COLOR_CHEST,
     COLOR_CHEST_GUARDED,
     COLOR_DIM,
-    COLOR_FLOOR,
-    COLOR_FLOOR_DARK,
     COLOR_GOLD,
     COLOR_GUARDED_FLOOR,
     COLOR_HP,
@@ -31,8 +32,6 @@ from constants import (
     COLOR_TRASH_DARK,
     COLOR_UI,
     COLOR_VAULT_FLOOR,
-    COLOR_WALL,
-    COLOR_WALL_DARK,
     COLOR_WARN,
     COLOR_XP,
     FOV_RADIUS,
@@ -82,7 +81,7 @@ HELP_ROWS = [
     ("Poison", "P<n> in status; antidote cures it"),
     ("Foes", "bats strike twice, skeletons shoot arrows"),
     ("", "spiders poison, cultists summon minions"),
-    ("Goal", "descend 10 floors and escape"),
+    ("Goal", f"descend {MAX_DEPTH} floors and escape"),
     ("", ""),
     ("", "Press any key to return..."),
 ]
@@ -152,6 +151,7 @@ def _special_floor_color(kind: str | None) -> tuple[int, int, int] | None:
 def _render_map(console: tcod.console.Console, game: Game) -> None:
     grid = game.dungeon.grid
     left, top = game.camera()
+    wall_color, floor_color = BIOME_COLORS[biome_index(game.depth)]
     for sy in range(VIEW_H):
         wy = top + sy
         if not 0 <= wy < game.dungeon.h:
@@ -170,17 +170,17 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
             if visible:
                 light = _light(game, wx, wy)
                 if ch == "#":
-                    fg = _tint(COLOR_WALL, light)
+                    fg = _tint(wall_color, light)
                 elif ch == ">":
                     fg = _tint(COLOR_STAIRS, 0.75 + light * 0.25)
                 elif ch == TRASH_CHAR:
                     fg = _tint(COLOR_TRASH, 0.75 + light * 0.25)
                 else:
-                    fg = _tint(special or COLOR_FLOOR, light)
+                    fg = _tint(special or floor_color, light)
                 bg = _warm_glow(game, wx, wy)
             else:
                 if ch == "#":
-                    fg = COLOR_WALL_DARK
+                    fg = _tint(wall_color, 0.28)
                 elif ch == ">":
                     fg = (40, 90, 55)
                 elif ch == TRASH_CHAR:
@@ -188,7 +188,7 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                 elif special:
                     fg = _tint(special, 0.22)
                 else:
-                    fg = COLOR_FLOOR_DARK
+                    fg = _tint(floor_color, 0.20)
                 bg = COLOR_BG
             _put(console, sx, sy, ch, fg, bg)
 
@@ -619,7 +619,8 @@ def _render_pause(console: tcod.console.Console, game: Game) -> None:
     console.print(
         x0 + 2,
         y0 + 1,
-        f"Depth {game.depth}   {slot}"[: width - 4],
+        f"Depth {game.depth} · {BIOME_NAMES[biome_index(game.depth)]}"
+        f"   {slot}"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
