@@ -25,6 +25,10 @@ STATUS_Y = VIEW_H
 LOG_Y = VIEW_H + STATUS_H
 HINT_Y = SCREEN_H - 1
 
+# Полноэкранная карта: рамка по краю и строка подсказок внизу.
+MAP_VIEW_W = SCREEN_W - 2
+MAP_VIEW_H = SCREEN_H - 4
+
 FOV_RADIUS = 11  # радиус обзора; стены на краю подсвечиваются отдельно
 MAX_DEPTH = 25
 
@@ -62,10 +66,12 @@ LOG_HISTORY = 200
 REGEN_TURNS_DANGER = 12  # 1 HP за столько ходов, если враг рядом
 REGEN_TURNS_SAFE = 6     # быстрее, когда этаж зачищен
 REGEN_AMOUNT = 1
-LEVEL_UP_HEAL_RATIO = 0.25
+LEVEL_UP_HEAL_RATIO = 0.30
 LEVEL_UP_HEAL_MIN = 6
-DESCEND_HEAL_RATIO = 0.20
+DESCEND_HEAL_RATIO = 0.30
 DESCEND_HEAL_MIN = 6
+BOSS_HEAL_RATIO = 0.25
+BOSS_HEAL_MIN = 8
 
 # Поведение врагов.
 ENEMY_RANGED_RANGE = 6
@@ -100,6 +106,7 @@ COLOR_FLOOR = (92, 92, 108)
 COLOR_WALL_DARK = (38, 38, 62)
 COLOR_FLOOR_DARK = (22, 22, 40)
 COLOR_PLAYER = (255, 255, 90)
+COLOR_SPAWN = (110, 200, 255)
 COLOR_ENEMY = (220, 70, 70)
 COLOR_ITEM = (210, 90, 210)
 COLOR_GOLD = (245, 205, 60)
@@ -153,3 +160,4 @@ MODE_TRASH = "trash"
 MODE_CHEST = "chest"
 MODE_HELP = "help"
 MODE_DEAD = "dead"
+MODE_MAP = "map"

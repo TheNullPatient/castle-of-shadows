@@ -190,6 +190,7 @@ def item_to_dict(item: Item) -> dict[str, Any]:
         "quantity": item.quantity,
         "durability": item.durability,
         "max_durability": item.max_durability,
+        "map_open": item.map_open,
     }
 
 
@@ -208,6 +209,7 @@ def item_from_dict(data: dict[str, Any]) -> Item:
         quantity=int(data.get("quantity", 1)),
         durability=int(data.get("durability", 0)),
         max_durability=int(data.get("max_durability", 0)),
+        map_open=bool(data.get("map_open", False)),
     )
 
 
@@ -295,6 +297,7 @@ def build_state(game: Any) -> dict[str, Any]:
             "armor": _equipment_index(inventory.items, inventory.armor),
         },
         "stairs": list(game.stairs),
+        "spawn": list(game.spawn),
         "stats": {
             "player_level": game.player_level,
             "player_xp": game.player_xp,
@@ -372,6 +375,10 @@ def apply_state(game: Any, data: dict[str, Any]) -> None:
     game.player = entity_from_dict(data["player"])
     _restore_inventory(game, data.get("inventory", {}))
     game.stairs = tuple(int(v) for v in data.get("stairs", (0, 0)))
+    fallback_spawn = (game.player.x, game.player.y)
+    game.spawn = tuple(
+        int(v) for v in data.get("spawn", fallback_spawn)
+    )
 
     stats = data.get("stats", {})
     game.player_level = int(stats.get("player_level", 1))

@@ -12,6 +12,8 @@ from constants import (
     AGGRO_RANGE,
     BIOME_NAMES,
     biome_index,
+    BOSS_HEAL_MIN,
+    BOSS_HEAL_RATIO,
     CHEST_CAPACITY,
     CHEST_TRAP_BONUS_GUARDED,
     CHEST_TRAP_CHANCE,
@@ -33,6 +35,8 @@ from constants import (
     LOG_H,
     LOG_HISTORY,
     MAP_H,
+    MAP_VIEW_H,
+    MAP_VIEW_W,
     MAP_W,
     MAX_DEPTH,
     MAX_ENEMIES,
@@ -40,6 +44,7 @@ from constants import (
     MODE_DEAD,
     MODE_HELP,
     MODE_INVENTORY,
+    MODE_MAP,
     MODE_MENU,
     MODE_PAUSE,
     MODE_PLAYING,
@@ -62,10 +67,10 @@ from dungeon import Dungeon
 from entities import (
     BOSS_TYPES,
     ENEMY_BY_NAME,
-    ENEMY_TYPES,
     Chest,
     Entity,
     Item,
+    enemy_pool,
     make_boss,
     make_chest_loot,
     make_enemy,
@@ -180,6 +185,10 @@ class Game:
         self.chest_hinted = False
         self.special_rooms: list[tuple[int, int, int, int, str]] = []
         self.special_room_seen: set[tuple[int, int, int, int]] = set()
+        self.spawn = (0, 0)
+        self.map_left = 0
+        self.map_top = 0
+        self.skip_turn = False
         self.visible = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.explored = np.zeros((MAP_W, MAP_H), dtype=bool, order="F")
         self.dungeon: Dungeon
@@ -339,6 +348,8 @@ class Game:
         return self.player.df + bonus
 
     def new_level(self, first: bool = False) -> None:
+        if not first:
+            self._expire_maps()
         self.dungeon = Dungeon(MAP_W, MAP_H)
         r0 = self.dungeon.rooms[0]
         px = r0[0] + r0[2] // 2
@@ -359,6 +370,7 @@ class Game:
                         f"You bind your wounds (+{healed} HP).",
                         "heal",
                     )
+        self.spawn = (px, py)
         self.regen_counter = 0
 
         rl = self.dungeon.rooms[-1]
@@ -531,12 +543,7 @@ class Game:
         pos = self._free_spot_in_room(room)
         if pos is None:
             return
-        pool = [
-            e
-            for e in ENEMY_TYPES
-            if e[6] <= self.depth // 2 + 1
-        ] or [ENEMY_TYPES[0]]
-        kind = random.choice(pool)
+        kind = random.choice(enemy_pool(self.depth))
         self.enemies.append(make_enemy(kind, pos[0], pos[1], self.depth))
 
     def _special_room_entry_at(
@@ -691,8 +698,10 @@ class Game:
 
     def _spawn_enemies(self) -> None:
         rooms = len(self.dungeon.rooms)
-        num = 3 + self.depth + max(0, rooms - 6) // 4
-        pool = [e for e in ENEMY_TYPES if e[6] <= self.depth // 2 + 1] or [ENEMY_TYPES[0]]
+        # Меньше врагов, но каждый заметнее: длинный забег не должен
+        # превращаться в зачистку десятков крыс на каждом этаже.
+        num = 3 + self.depth // 3 + max(0, rooms - 6) // 8
+        pool = enemy_pool(self.depth)
         for _ in range(num):
             pos = self._free_spot()
             if pos is None:
@@ -821,6 +830,46 @@ class Game:
             )
         return left, top
 
+    def _clamp_map(self, left: int, top: int) -> tuple[int, int]:
+        width, height = self.dungeon.w, self.dungeon.h
+        if width <= MAP_VIEW_W:
+            left = (width - MAP_VIEW_W) // 2
+        else:
+            left = min(max(0, left), width - MAP_VIEW_W)
+        if height <= MAP_VIEW_H:
+            top = (height - MAP_VIEW_H) // 2
+        else:
+            top = min(max(0, top), height - MAP_VIEW_H)
+        return left, top
+
+    def map_camera(self) -> tuple[int, int]:
+        """Левый верхний угол полноэкранной карты."""
+        return self._clamp_map(self.map_left, self.map_top)
+
+    def open_map(self) -> None:
+        if self.player is None:
+            return
+        self.center_map()
+        self.mode = MODE_MAP
+
+    def close_map(self) -> None:
+        if self.mode == MODE_MAP:
+            self.mode = MODE_PLAYING
+
+    def center_map(self) -> None:
+        if self.player is None:
+            return
+        self.map_left, self.map_top = self._clamp_map(
+            self.player.x - MAP_VIEW_W // 2,
+            self.player.y - MAP_VIEW_H // 2,
+        )
+
+    def scroll_map(self, dx: int, dy: int) -> None:
+        self.map_left, self.map_top = self._clamp_map(
+            self.map_left + dx,
+            self.map_top + dy,
+        )
+
     def _light_wall_edges(self) -> None:
         """Подсветить стены, примыкающие к видимому полу.
 
@@ -892,6 +941,13 @@ class Game:
                 "gold",
             )
             self.items.append(random_loot(enemy.x, enemy.y, self.depth))
+            heal = max(
+                BOSS_HEAL_MIN,
+                int(self.player.max_hp * BOSS_HEAL_RATIO),
+            )
+            healed = self._heal_player(heal)
+            if healed:
+                self.msg(f"You catch your breath (+{healed} HP).", "heal")
         self._check_level_up()
 
     def _hurt_player(
@@ -1100,8 +1156,10 @@ class Game:
         self.msg(f"You pick up {item.name}.", "item")
 
     def use_inventory(self, index: int) -> bool:
+        self.skip_turn = False
         if self.inventory.use(index, self):
-            self.player_acted()
+            if not self.skip_turn:
+                self.player_acted()
             return True
         return False
 
@@ -1191,6 +1249,24 @@ class Game:
             return False
         self.player.x, self.player.y = random.choice(spots)
         return True
+
+    def _expire_maps(self) -> None:
+        """Израсходовать свитки карты, открытые на прошлом этаже."""
+        spent = 0
+        for index in range(len(self.inventory.items) - 1, -1, -1):
+            item = self.inventory.items[index]
+            if (
+                item.kind == "scroll"
+                and item.effect == "mapping"
+                and item.map_open
+            ):
+                item.map_open = False
+                item.quantity -= 1
+                spent += 1
+                if item.quantity <= 0:
+                    self.inventory.items.pop(index)
+        if spent:
+            self.msg("The spent map crumbles to dust.", "item")
 
     def reveal_map(self) -> None:
         for y in range(self.dungeon.h):

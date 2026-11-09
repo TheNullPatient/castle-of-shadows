@@ -44,6 +44,7 @@ class Inventory:
                     continue
                 moved = min(room, item.quantity)
                 stack.quantity += moved
+                stack.map_open = stack.map_open or item.map_open
                 item.quantity -= moved
                 if item.quantity <= 0:
                     return True
@@ -110,6 +111,9 @@ class Inventory:
                 extra = f" (+{item.value})"
         elif item.kind == "gold":
             extra = f" ({item.value})"
+        elif item.kind == "scroll" and item.effect == "mapping":
+            if item.map_open:
+                extra = " (map open)"
         if item.max_durability > 0:
             extra += f" [{item.durability}/{item.max_durability}]"
         if item.quantity > 1:
@@ -202,9 +206,20 @@ class Inventory:
             game.msg("The world twists. You teleport!", "item")
             return True
         if effect == "mapping":
-            self.consume(index)
-            game.reveal_map()
-            game.msg("A map of this floor unfolds in your mind.", "item")
+            first = not item.map_open
+            if first:
+                item.map_open = True
+                game.reveal_map()
+                game.msg(
+                    "A map of this floor unfolds in your mind. "
+                    "It will last until you descend.",
+                    "item",
+                )
+            else:
+                game.msg("You unfold the map again.", "item")
+            game.open_map()
+            # Первое раскрытие стоит хода, повторное открытие — нет.
+            game.skip_turn = not first
             return True
         if effect == "fire":
             self.consume(index)

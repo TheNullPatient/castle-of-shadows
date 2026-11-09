@@ -67,6 +67,7 @@ class Item:
     quantity: int = 1
     durability: int = 0
     max_durability: int = 0
+    map_open: bool = False
 
     def __post_init__(self) -> None:
         if self.max_durability > 0 and self.durability <= 0:
@@ -87,6 +88,7 @@ class Item:
             quantity=self.quantity,
             durability=self.durability,
             max_durability=self.max_durability,
+            map_open=self.map_open,
         )
 
     def copy(self) -> Item:
@@ -97,6 +99,7 @@ class Item:
         amount = max(1, min(amount, self.quantity))
         part = self.copy()
         part.quantity = amount
+        part.map_open = False
         self.quantity -= amount
         return part
 
@@ -258,10 +261,24 @@ def make_player(x: int, y: int) -> Entity:
     return Entity(x, y, "@", "Hero", 30, 30, 5, 2, COLOR_PLAYER, speed=100)
 
 
+def enemy_pool(depth: int) -> list[tuple]:
+    """Враги, уместные на текущей глубине.
+
+    Верхняя граница открывает новые тиры примерно каждые четыре этажа,
+    нижняя — убирает крыс и летучих мышей с поздних этажей, чтобы там
+    встречались действительно опасные противники, а не «мусор».
+    """
+    cap = min(5, 1 + depth // 4)
+    lower = max(0, cap - 2)
+    pool = [kind for kind in ENEMY_TYPES if lower <= kind[6] <= cap]
+    return pool or [ENEMY_TYPES[0]]
+
+
 def make_enemy(kind: tuple, x: int, y: int, depth: int) -> Entity:
     ch, name, hp, atk, df, xp, _tier, behavior = kind
-    hp += depth
+    hp += depth + depth // 2
     atk += depth // 2
+    xp += depth
     color = ENEMY_COLORS.get(name, COLOR_ENEMY)
     return Entity(
         x, y, ch, name, hp, hp, atk, df, color, xp,

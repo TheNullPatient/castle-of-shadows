@@ -11,7 +11,9 @@ from tcod.event import KeySym
 
 from constants import (
     LOG_H,
+    MAP_VIEW_H,
     MODE_CHEST,
+    MODE_MAP,
     MODE_MENU,
     MODE_PAUSE,
     MODE_SLOTS,
@@ -173,6 +175,8 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return _handle_menu(game, event)
     if game.mode == MODE_SLOTS:
         return _handle_slots(game, event)
+    if game.mode == MODE_MAP:
+        return _handle_map(game, event)
     if game.mode == MODE_PAUSE:
         return _handle_pause(game, event)
     if game.mode == "dead":
@@ -237,6 +241,26 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
     if sym in (KeySym.EQUALS, KeySym.KP_PLUS, KeySym.PLUS):
         game.log.scroll(-1)
         return False
+    return False
+
+
+def _handle_map(game: Game, event: tcod.event.KeyDown) -> bool:
+    sym = event.sym
+    if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
+        game.close_map()
+        return False
+    if sym in MOVE_KEYS:
+        dx, dy = MOVE_KEYS[sym]
+        game.scroll_map(dx, dy)
+        return False
+    if sym == KeySym.PAGEUP:
+        game.scroll_map(0, -(MAP_VIEW_H // 2))
+        return False
+    if sym == KeySym.PAGEDOWN:
+        game.scroll_map(0, MAP_VIEW_H // 2)
+        return False
+    if sym in (KeySym.HOME, KeySym.C):
+        game.center_map()
     return False
 
 

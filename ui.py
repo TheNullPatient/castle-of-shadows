@@ -27,6 +27,7 @@ from constants import (
     COLOR_PANEL,
     COLOR_PANEL_LIGHT,
     COLOR_PLAYER,
+    COLOR_SPAWN,
     COLOR_STAIRS,
     COLOR_TRASH,
     COLOR_TRASH_DARK,
@@ -38,8 +39,11 @@ from constants import (
     HINT_Y,
     LOG_H,
     LOG_Y,
+    MAP_VIEW_H,
+    MAP_VIEW_W,
     MAX_DEPTH,
     MODE_CHEST,
+    MODE_MAP,
     MODE_MENU,
     MODE_PAUSE,
     MODE_SLOTS,
@@ -65,15 +69,15 @@ HELP_ROWS = [
     ("Chests", "i near '=': a-z take, Del put"),
     ("Vaults", "gold/red rooms hide chests and guards"),
     ("Descend", "stand on '>' and press > or Enter"),
-    ("Map", "floors are larger than the screen"),
-    ("Camera", "follows you; stairs lie far away"),
+    ("Map", "larger floors; camera follows you"),
+    ("Map scroll", "use it, then reopen from inventory"),
+    ("Spawn", "'<' marks where you entered the floor"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),
     ("Pause", "Esc: menu and desktop options"),
     ("Quick quit", "Q in pause: save & menu"),
     ("Saves", "5 slots; Continue in the menu"),
     ("Restart", "R (on the death screen)"),
-    ("", ""),
     ("Health", "slow regen; floors/levels heal partly"),
     ("Potions", "heal, antidote, strength, iron skin"),
     ("Scrolls", "teleport, mapping, fire, healing, lightning"),
@@ -82,7 +86,6 @@ HELP_ROWS = [
     ("Foes", "bats strike twice, skeletons shoot arrows"),
     ("", "spiders poison, cultists summon minions"),
     ("Goal", f"descend {MAX_DEPTH} floors and escape"),
-    ("", ""),
     ("", "Press any key to return..."),
 ]
 
@@ -122,6 +125,9 @@ def render(console: tcod.console.Console, game: Game) -> None:
         return
     if game.mode == "dead":
         _render_death(console, game)
+        return
+    if game.mode == MODE_MAP:
+        _render_full_map(console, game)
         return
     _render_map(console, game)
     _render_entities(console, game)
@@ -193,8 +199,87 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
             _put(console, sx, sy, ch, fg, bg)
 
 
+def _render_full_map(console: tcod.console.Console, game: Game) -> None:
+    """Полноэкранная карта этажа с прокруткой."""
+    console.clear(fg=COLOR_UI, bg=COLOR_BG)
+    wall_color, floor_color = BIOME_COLORS[biome_index(game.depth)]
+    biome = BIOME_NAMES[biome_index(game.depth)]
+    console.draw_frame(
+        0,
+        0,
+        SCREEN_W,
+        SCREEN_H,
+        title=f" MAP · Depth {game.depth} · {biome} ",
+        fg=COLOR_GOLD,
+        bg=COLOR_BG,
+        clear=True,
+    )
+    left, top = game.map_camera()
+    grid = game.dungeon.grid
+    for sy in range(MAP_VIEW_H):
+        wy = top + sy
+        if not 0 <= wy < game.dungeon.h:
+            continue
+        row = grid[wy]
+        for sx in range(MAP_VIEW_W):
+            wx = left + sx
+            if not 0 <= wx < game.dungeon.w:
+                continue
+            if not game.is_explored(wx, wy):
+                continue
+            ch = row[wx]
+            visible = game.is_visible(wx, wy)
+            special = _special_floor_color(game.special_room_at(wx, wy))
+            if ch == "#":
+                fg = _tint(wall_color, 0.62 if visible else 0.42)
+            elif ch == ">":
+                fg = COLOR_STAIRS
+            elif ch == TRASH_CHAR:
+                fg = COLOR_TRASH
+            elif special:
+                fg = _tint(special, 0.75 if visible else 0.50)
+            else:
+                fg = _tint(floor_color, 0.72 if visible else 0.48)
+            _put(console, 1 + sx, 1 + sy, ch, fg, COLOR_BG)
+
+    spawn = getattr(game, "spawn", None)
+    if spawn is not None and game.is_explored(spawn[0], spawn[1]):
+        sx, sy = spawn[0] - left, spawn[1] - top
+        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+            _put(console, 1 + sx, 1 + sy, "<", COLOR_SPAWN, COLOR_BG)
+
+    for chest in game.chests:
+        if not game.is_explored(chest.x, chest.y):
+            continue
+        sx, sy = chest.x - left, chest.y - top
+        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+            color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
+            _put(console, 1 + sx, 1 + sy, CHEST_CHAR, color, COLOR_BG)
+
+    player = game.player
+    if player is not None:
+        sx, sy = player.x - left, player.y - top
+        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+            _put(console, 1 + sx, 1 + sy, "@", COLOR_PLAYER, COLOR_BG)
+
+    legend = " < spawn   > stairs   @ you"
+    console.print(1, SCREEN_H - 3, legend[:SCREEN_W - 2], fg=COLOR_DIM, bg=COLOR_BG)
+    hint = "WASD/arrows scroll · PgUp/PgDn · Home center · Tab/Esc/i close"
+    console.print(1, SCREEN_H - 2, hint[:SCREEN_W - 2], fg=COLOR_DIM, bg=COLOR_BG)
+
+
 def _render_entities(console: tcod.console.Console, game: Game) -> None:
     left, top = game.camera()
+    spawn = getattr(game, "spawn", None)
+    if spawn is not None and game.is_explored(spawn[0], spawn[1]):
+        sx, sy = spawn[0] - left, spawn[1] - top
+        if 0 <= sx < VIEW_W and 0 <= sy < VIEW_H:
+            color = (
+                COLOR_SPAWN
+                if game.is_visible(spawn[0], spawn[1])
+                else _tint(COLOR_SPAWN, 0.55)
+            )
+            _put(console, sx, sy, "<", color)
     for chest in game.chests:
         if game.is_visible(chest.x, chest.y):
             color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
