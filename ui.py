@@ -78,7 +78,7 @@ HELP_ROWS = [
     ("Quick quit", "Q in pause: save & menu"),
     ("Saves", "5 slots; Continue in the menu"),
     ("Restart", "R (on the death screen)"),
-    ("Health", "slow regen; floors/levels heal partly"),
+    ("Health", "no passive regen; potions/floors heal"),
     ("Potions", "heal, antidote, strength, iron skin"),
     ("Scrolls", "teleport, mapping, fire, healing, lightning"),
     ("Gear", "weapons/armor lose durability when used"),

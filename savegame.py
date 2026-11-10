@@ -308,7 +308,6 @@ def build_state(game: Any) -> dict[str, Any]:
             "killed_by": game.killed_by,
             "poison_turns": game.poison_turns,
             "poison_damage": game.poison_damage,
-            "regen_counter": game.regen_counter,
         },
         "enemies": [entity_to_dict(enemy) for enemy in game.enemies],
         "items": [item_to_dict(item) for item in game.items],
@@ -390,7 +389,6 @@ def apply_state(game: Any, data: dict[str, Any]) -> None:
     game.killed_by = str(stats.get("killed_by", ""))
     game.poison_turns = int(stats.get("poison_turns", 0))
     game.poison_damage = int(stats.get("poison_damage", 0))
-    game.regen_counter = int(stats.get("regen_counter", 0))
 
     game.enemies = [
         entity_from_dict(enemy) for enemy in data.get("enemies", [])

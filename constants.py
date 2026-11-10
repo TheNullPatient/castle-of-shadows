@@ -62,10 +62,7 @@ FIRE_DAMAGE = 12
 AGGRO_RANGE = 7
 LOG_HISTORY = 200
 
-# Здоровье: естественная регенерация и частичное лечение.
-REGEN_TURNS_DANGER = 12  # 1 HP за столько ходов, если враг рядом
-REGEN_TURNS_SAFE = 6     # быстрее, когда этаж зачищен
-REGEN_AMOUNT = 1
+# Здоровье: частичное лечение как награда за прогресс.
 LEVEL_UP_HEAL_RATIO = 0.30
 LEVEL_UP_HEAL_MIN = 6
 DESCEND_HEAL_RATIO = 0.30

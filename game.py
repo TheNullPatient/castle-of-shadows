@@ -52,9 +52,6 @@ from constants import (
     MODE_TRASH,
     POISON_DAMAGE,
     POISON_TURNS,
-    REGEN_AMOUNT,
-    REGEN_TURNS_DANGER,
-    REGEN_TURNS_SAFE,
     SUMMON_COOLDOWN,
     TRASH_CAPACITY,
     TRASH_CHAR,
@@ -172,7 +169,6 @@ class Game:
         self.killed_by = ""
         self.poison_turns = 0
         self.poison_damage = POISON_DAMAGE
-        self.regen_counter = 0
         self.enemies: list[Entity] = []
         self.items: list[Item] = []
         self.trash_pos: tuple[int, int] | None = None
@@ -371,7 +367,6 @@ class Game:
                         "heal",
                     )
         self.spawn = (px, py)
-        self.regen_counter = 0
 
         rl = self.dungeon.rooms[-1]
         self.stairs = (rl[0] + rl[2] // 2, rl[1] + rl[3] // 2)
@@ -1055,27 +1050,6 @@ class Game:
         self.player.hp = min(self.player.max_hp, self.player.hp + amount)
         return self.player.hp - before
 
-    def _regen_tick(self) -> None:
-        """Естественная регенерация: медленно в бою, быстрее на безопасном этаже."""
-        if (
-            self.game_over
-            or self.player.hp >= self.player.max_hp
-            or self.poison_turns > 0
-        ):
-            self.regen_counter = 0
-            return
-
-        threat = any(
-            abs(e.x - self.player.x) + abs(e.y - self.player.y)
-            <= AGGRO_RANGE
-            for e in self.enemies
-        )
-        interval = REGEN_TURNS_DANGER if threat else REGEN_TURNS_SAFE
-        self.regen_counter += 1
-        if self.regen_counter >= interval:
-            self.regen_counter = 0
-            self._heal_player(REGEN_AMOUNT)
-
     def _check_level_up(self) -> None:
         while self.player_xp >= self.xp_next:
             self.player_xp -= self.xp_next
@@ -1104,8 +1078,6 @@ class Game:
         self.enemy_turn()
         if not self.game_over:
             self._poison_tick()
-        if not self.game_over:
-            self._regen_tick()
         if not self.game_over:
             self.update_fov()
 
