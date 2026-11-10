@@ -64,9 +64,9 @@ HELP_ROWS = [
     ("Pick up", "walk over an item (gold auto)"),
     ("Inventory", "Tab, then a-z to use / equip"),
     ("Interact", "i: chest / trash nearby"),
-    ("Throw away", "in trash menu: Del, then a-z"),
+    ("Throw away", "trash menu: Del, a-z (one at a time)"),
     ("Trash", "stand next to '%' and press i"),
-    ("Chests", "i near '=': a-z take, Del put"),
+    ("Chests", "i near '=': a-z take, Del put (one)"),
     ("Vaults", "gold/red rooms hide chests and guards"),
     ("Descend", "stand on '>' and press > or Enter"),
     ("Map", "larger floors; camera follows you"),
@@ -475,7 +475,10 @@ def _render_inventory(
     else:
         rows_per_column = height - 7
         columns = 2 if len(inventory.items) > rows_per_column else 1
-        column_width = (width - 4) // columns - 1 if columns > 1 else width - 4
+        # В двух колонках используем всю ширину панели, чтобы длинные
+        # названия вроде "Potion of Iron Skin (+1 DEF)" не обрезались.
+        column_width = (width - 4) // 2 if columns == 2 else width - 4
+        stride = column_width + 1 if columns == 2 else width - 4
         for i, item in enumerate(inventory.items):
             column = i // rows_per_column
             row = i % rows_per_column
@@ -484,12 +487,12 @@ def _render_inventory(
             letter = chr(ord("a") + i)
             equipped = item is inventory.weapon or item is inventory.armor
             marker = "*" if equipped else " "
-            line = f" {letter}) {marker}{inventory.label(item)}"
+            line = f"{letter}){marker}{inventory.label(item)}"
             fg = COLOR_GOLD if equipped else item.color
             console.print(
-                x0 + 2 + column * (column_width + 2),
+                x0 + 2 + column * stride,
                 y0 + 5 + row,
-                line[:column_width],
+                line,
                 fg=fg,
                 bg=COLOR_PANEL,
             )
@@ -513,7 +516,7 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
             game,
             title=" Put into trash "
             f"(pack {len(game.inventory.items)}/{game.inventory.capacity}) ",
-            hint="a-z put   ESC cancel",
+            hint="a-z put one   ESC done",
         )
         return
     width = min(VIEW_W - 4, 50)
@@ -563,7 +566,7 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
             game,
             title=" Put into chest "
             f"(pack {len(game.inventory.items)}/{game.inventory.capacity}) ",
-            hint="a-z put   ESC cancel",
+            hint="a-z put one   ESC done",
         )
         return
     width = min(VIEW_W - 4, 50)

@@ -102,7 +102,7 @@ class Inventory:
             if item.effect == "health":
                 extra = f" (+{item.value} HP)"
             elif item.effect == "antidote":
-                extra = " (cures poison)"
+                extra = " (antidote)"
             elif item.effect == "strength":
                 extra = f" (+{item.value} ATK)"
             elif item.effect == "ironskin":
@@ -117,7 +117,7 @@ class Inventory:
         if item.max_durability > 0:
             extra += f" [{item.durability}/{item.max_durability}]"
         if item.quantity > 1:
-            extra += f" ×{item.quantity}"
+            extra += f"×{item.quantity}"
         return f"{item.name}{extra}"
 
     def label(self, item: Item) -> str:

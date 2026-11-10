@@ -639,9 +639,17 @@ class Game:
                 "warn",
             )
             return False
-        item = self.inventory.remove(index)
-        chest.items.append(item)
-        self.msg(f"You put {item.name} in the chest.", "item")
+        item = self.inventory.items[index]
+        if item.quantity > 1:
+            piece = item.split(1)
+        else:
+            piece = self.inventory.remove(index)
+        chest.items.append(piece)
+        self.msg(
+            f"You put {piece.name} in the chest. "
+            f"({len(chest.items)}/{CHEST_CAPACITY})",
+            "item",
+        )
         return True
 
     def chest_nearby(self) -> Chest | None:
@@ -1197,10 +1205,14 @@ class Game:
                 "warn",
             )
             return False
-        item = self.inventory.remove(index)
-        self.trash_items.append(item)
+        item = self.inventory.items[index]
+        if item.quantity > 1:
+            piece = item.split(1)
+        else:
+            piece = self.inventory.remove(index)
+        self.trash_items.append(piece)
         self.msg(
-            f"You throw {item.name} into the trash. "
+            f"You throw {piece.name} into the trash. "
             f"({len(self.trash_items)}/{TRASH_CAPACITY})",
             "item",
         )
