@@ -81,7 +81,7 @@ HELP_ROWS = [
     ("Health", "no passive regen; potions/floors heal"),
     ("Potions", "heal, antidote, strength, iron skin"),
     ("Scrolls", "teleport, mapping, fire, healing, lightning"),
-    ("Gear", "weapons/armor lose durability when used"),
+    ("Gear", "weapons 1/attack, armor 2/hit"),
     ("Poison", "P<n> in status; antidote cures it"),
     ("Foes", "bats strike twice, skeletons shoot arrows"),
     ("", "spiders poison, cultists summon minions"),
@@ -509,6 +509,22 @@ def _render_inventory(
     )
 
 
+def _container_lines(game: Game, items: list) -> list[tuple[str, tuple]]:
+    """Строки меню мусорки/сундука с полными названиями предметов."""
+    lines = []
+    for i, item in enumerate(items):
+        letter = chr(ord("a") + i)
+        fg = COLOR_GOLD if item.kind == "gold" else item.color
+        lines.append((f" {letter}) {game.inventory.label(item)}", fg))
+    return lines
+
+
+def _container_width(lines: list[tuple[str, tuple]]) -> int:
+    """Ширина панели, достаточная для самой длинной строки."""
+    longest = max((len(line) for line, _ in lines), default=0)
+    return min(VIEW_W - 2, max(50, longest + 4))
+
+
 def _render_trash(console: tcod.console.Console, game: Game) -> None:
     if game.trash_deposit_mode:
         _render_inventory(
@@ -519,7 +535,11 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
             hint="a-z put one   ESC done",
         )
         return
-    width = min(VIEW_W - 4, 50)
+    lines = _container_lines(
+        game,
+        game.trash_items[:TRASH_CAPACITY],
+    )
+    width = _container_width(lines)
     height = min(VIEW_H, TRASH_CAPACITY + 5)
     x0 = max(1, (VIEW_W - width) // 2)
     y0 = max(1, (VIEW_H - height) // 2)
@@ -533,18 +553,17 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
         bg=COLOR_PANEL,
         clear=True,
     )
-    if not game.trash_items:
+    if not lines:
         console.print(
             x0 + 2, y0 + 2, "(empty)", fg=COLOR_DIM, bg=COLOR_PANEL
         )
     else:
-        for i, item in enumerate(game.trash_items[:TRASH_CAPACITY]):
-            letter = chr(ord("a") + i)
+        for i, (line, fg) in enumerate(lines):
             console.print(
                 x0 + 2,
                 y0 + 2 + i,
-                f" {letter}) {game.inventory.label(item)}"[: width - 4],
-                fg=item.color,
+                line[: width - 4],
+                fg=fg,
                 bg=COLOR_PANEL,
             )
     console.print(
@@ -569,7 +588,8 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
             hint="a-z put one   ESC done",
         )
         return
-    width = min(VIEW_W - 4, 50)
+    lines = _container_lines(game, chest.items)
+    width = _container_width(lines)
     height = min(VIEW_H, max(7, len(chest.items) + 5))
     x0 = max(1, (VIEW_W - width) // 2)
     y0 = max(1, (VIEW_H - height) // 2)
@@ -585,27 +605,16 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
         bg=COLOR_PANEL,
         clear=True,
     )
-    if not chest.items:
+    if not lines:
         console.print(
             x0 + 2, y0 + 2, "(empty)", fg=COLOR_DIM, bg=COLOR_PANEL
         )
     else:
-        rows_per_column = height - 6
-        columns = 2 if len(chest.items) > rows_per_column else 1
-        column_width = (
-            (width - 4) // columns - 1 if columns > 1 else width - 4
-        )
-        for i, item in enumerate(chest.items):
-            column = i // rows_per_column
-            row = i % rows_per_column
-            if column >= columns:
-                break
-            letter = chr(ord("a") + i)
-            fg = COLOR_GOLD if item.kind == "gold" else item.color
+        for i, (line, fg) in enumerate(lines):
             console.print(
-                x0 + 2 + column * (column_width + 2),
-                y0 + 2 + row,
-                f" {letter}) {game.inventory.label(item)}"[:column_width],
+                x0 + 2,
+                y0 + 2 + i,
+                line[: width - 4],
                 fg=fg,
                 bg=COLOR_PANEL,
             )

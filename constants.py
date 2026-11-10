@@ -70,6 +70,9 @@ DESCEND_HEAL_MIN = 6
 BOSS_HEAL_RATIO = 0.25
 BOSS_HEAL_MIN = 8
 
+# Износ экипировки: оружие — за удар, броня — за каждое попадание.
+ARMOR_WEAR_PER_HIT = 2
+
 # Поведение врагов.
 ENEMY_RANGED_RANGE = 6
 POISON_TURNS = 3

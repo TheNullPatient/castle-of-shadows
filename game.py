@@ -10,6 +10,7 @@ from tcod.constants import FOV_SYMMETRIC_SHADOWCAST
 
 from constants import (
     AGGRO_RANGE,
+    ARMOR_WEAR_PER_HIT,
     BIOME_NAMES,
     biome_index,
     BOSS_HEAL_MIN,
@@ -963,7 +964,10 @@ class Game:
             return
         self.player.hp -= dmg
         if wear_armor:
-            self._wear_equipment(self.inventory.armor)
+            self._wear_equipment(
+                self.inventory.armor,
+                ARMOR_WEAR_PER_HIT,
+            )
         if self.player.hp <= 0:
             self.player.hp = 0
             self.killed_by = source
@@ -1016,11 +1020,11 @@ class Game:
                 "warn",
             )
 
-    def _wear_equipment(self, item: Item | None) -> None:
-        """Износить оружие/броню на единицу и сломать при нуле."""
-        if item is None or item.max_durability <= 0:
+    def _wear_equipment(self, item: Item | None, amount: int = 1) -> None:
+        """Износить оружие/броню и сломать при нуле прочности."""
+        if item is None or item.max_durability <= 0 or amount <= 0:
             return
-        item.durability = max(0, item.durability - 1)
+        item.durability = max(0, item.durability - amount)
         if item.durability <= 0:
             inventory = self.inventory
             if inventory.weapon is item:
