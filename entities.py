@@ -31,10 +31,13 @@ from constants import (
     COLOR_SCROLL,
     COLOR_SCROLL_LIGHTNING,
     COLOR_WEAPON,
+    MERCHANT_CAPACITY,
     POTION_HEAL_BASE,
     POTION_HEAL_PER_DEPTH,
     SCROLL_HEAL_BASE,
     SCROLL_HEAL_PER_DEPTH,
+    SHOP_STOCK_MAX,
+    SHOP_STOCK_MIN,
     TRASH_GEAR_INTACT,
     TRASH_GEAR_MAX_FRAC,
     TRASH_GEAR_MIN_FRAC,
@@ -471,3 +474,84 @@ def make_chest_loot(depth: int, guarded: bool = False) -> list[Item]:
         Item("Gold", "$", "gold", COLOR_GOLD, value=gold),
         *items,
     ]
+
+
+_SCROLL_PRICES = {
+    "teleport": 35,
+    "mapping": 25,
+    "fire": 42,
+    "healing": 32,
+    "lightning": 48,
+}
+
+
+def shop_price(item: Item, depth: int) -> int:
+    """Цена одной единицы товара у торговца."""
+    if item.kind == "potion":
+        if item.effect == "health":
+            return 16 + depth * 2
+        if item.effect == "antidote":
+            return 12 + depth
+        if item.effect in ("strength", "ironskin"):
+            return 80 + depth * 6
+    if item.kind == "scroll":
+        return _SCROLL_PRICES.get(item.effect, 30) + depth * 2
+    if item.kind in ("weapon", "armor"):
+        return 35 + item.value * 24 + depth * 6
+    return max(1, item.value)
+
+
+def _scaled_stack(template: Item, depth: int, quantity: int) -> Item:
+    item = template.copy()
+    item.quantity = quantity
+    return _scale_consumable(item, depth)
+
+
+def make_merchant_stock(depth: int) -> list[Item]:
+    """Ассортимент торговца: расходники, иногда снаряжение."""
+    stock: list[Item] = []
+    health = next(item for item in POTION_TABLE if item.effect == "health")
+    antidote = next(item for item in POTION_TABLE if item.effect == "antidote")
+    stock.append(
+        _scaled_stack(health, depth, 2 + (1 if depth >= 10 else 0))
+    )
+    if random.random() < 0.8:
+        stock.append(_scaled_stack(antidote, depth, 1))
+    buffs = [
+        item
+        for item in POTION_TABLE
+        if item.effect in ("strength", "ironskin")
+    ]
+    if random.random() < 0.45:
+        stock.append(_scaled_stack(random.choice(buffs), depth, 1))
+    for scroll in random.sample(SCROLL_TABLE, k=2):
+        stock.append(_scaled_stack(scroll, depth, 1))
+    cap = min(MERCHANT_CAPACITY, SHOP_STOCK_MAX)
+    if random.random() < 0.6 and len(stock) < cap:
+        if depth >= 2 and random.random() < 0.22:
+            gear = random.choice(_bow_pool(depth)).copy()
+        elif random.random() < 0.6:
+            gear = random.choice(_weapon_pool(depth)).copy()
+        else:
+            gear = random.choice(_armor_pool(depth)).copy()
+        stock.append(gear)
+    while len(stock) < SHOP_STOCK_MIN:
+        stock.append(
+            _scaled_stack(random.choice(POTION_TABLE), depth, 1)
+        )
+    merged: list[Item] = []
+    for item in stock:
+        if item.kind in ("potion", "scroll"):
+            for existing in merged:
+                if (
+                    existing.kind == item.kind
+                    and existing.name == item.name
+                    and existing.effect == item.effect
+                ):
+                    existing.quantity += item.quantity
+                    break
+            else:
+                merged.append(item)
+        else:
+            merged.append(item)
+    return merged[:cap]

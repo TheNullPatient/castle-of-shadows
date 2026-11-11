@@ -41,6 +41,8 @@ from constants import (
     MAP_W,
     MAX_DEPTH,
     MAX_ENEMIES,
+    MERCHANT_DEPTH_OFFSET,
+    MERCHANT_DEPTH_STEP,
     MODE_CHEST,
     MODE_DEAD,
     MODE_HELP,
@@ -49,12 +51,14 @@ from constants import (
     MODE_MENU,
     MODE_PAUSE,
     MODE_PLAYING,
+    MODE_SHOP,
     MODE_SLOTS,
     MODE_TRASH,
     POISON_DAMAGE,
     POISON_PER_DEPTH,
     POISON_TURNS,
     PLAYER_RANGED_RANGE,
+    REPAIR_COST_DIVISOR,
     SUMMON_COOLDOWN,
     TRASH_CAPACITY,
     TRASH_CHAR,
@@ -76,8 +80,10 @@ from entities import (
     make_boss,
     make_chest_loot,
     make_enemy,
+    make_merchant_stock,
     make_player,
     random_loot,
+    shop_price,
 )
 from inventory import Inventory
 from savegame import (
@@ -107,6 +113,7 @@ SPECIAL_ROOM_TEXT = {
     "vault": "You enter a treasure vault. A chest waits in the corner.",
     "guarded": "You enter a guarded vault. Something stirs in the dark.",
     "camp": "You enter an abandoned camp. Leftovers lie scattered around.",
+    "shop": "You enter a trading post. A merchant waits by a lantern.",
 }
 
 
@@ -186,6 +193,11 @@ class Game:
         self.active_chest: Chest | None = None
         self.chest_deposit_mode = False
         self.chest_hinted = False
+        self.merchant_pos: tuple[int, int] | None = None
+        self.merchant_stock: list[Item] = []
+        self.merchant_noticed = False
+        self.shop_index = 0
+        self.shop_sell_mode = False
         self.special_rooms: list[tuple[int, int, int, int, str]] = []
         self.special_room_seen: set[tuple[int, int, int, int]] = set()
         self.spawn = (0, 0)
@@ -398,6 +410,11 @@ class Game:
         self.active_chest = None
         self.chest_deposit_mode = False
         self.chest_hinted = False
+        self.merchant_pos = None
+        self.merchant_stock = []
+        self.merchant_noticed = False
+        self.shop_index = 0
+        self.shop_sell_mode = False
         self.special_rooms = []
         self.special_room_seen = set()
         self.trash_items = []
@@ -405,6 +422,7 @@ class Game:
         self.trash_deposit_mode = False
         self.trash_pos = self._place_trash()
         self._prepare_special_rooms()
+        self._place_merchant()
         self._spawn_enemies()
         self._spawn_items()
         self._spawn_trash_loot()
@@ -500,6 +518,28 @@ class Game:
                         self.items.append(
                             random_loot(pos[0], pos[1], self.depth)
                         )
+
+    def _place_merchant(self) -> None:
+        """Поставить торговца в отдельную комнату на заданных этажах."""
+        if self.depth % MERCHANT_DEPTH_STEP != MERCHANT_DEPTH_OFFSET:
+            return
+        rooms = [
+            room
+            for room in self.dungeon.rooms[1:-1]
+            if not self._is_special_room(room)
+        ]
+        if not rooms:
+            rooms = list(self.dungeon.rooms[1:-1])
+        random.shuffle(rooms)
+        for room in rooms:
+            pos = self._free_spot_in_room(room)
+            if pos is None:
+                continue
+            self.merchant_pos = pos
+            self.merchant_stock = make_merchant_stock(self.depth)
+            if not self._is_special_room(room):
+                self.special_rooms.append((*room, "shop"))
+            return
 
     def _is_special_room(self, room: tuple[int, int, int, int]) -> bool:
         return any(entry[:4] == room for entry in self.special_rooms)
@@ -690,10 +730,135 @@ class Game:
             ),
         )
 
+    def merchant_nearby(self) -> bool:
+        if self.player is None or self.merchant_pos is None:
+            return False
+        return max(
+            abs(self.merchant_pos[0] - self.player.x),
+            abs(self.merchant_pos[1] - self.player.y),
+        ) == 1
+
+    def open_shop(self) -> None:
+        self.mode = MODE_SHOP
+        self.shop_index = 0
+        self.shop_sell_mode = False
+        self.msg("The merchant spreads out his wares.", "good")
+
+    def close_shop(self) -> None:
+        if self.mode == MODE_SHOP:
+            self.mode = MODE_PLAYING
+        self.shop_sell_mode = False
+
+    def shop_move(self, delta: int) -> None:
+        count = len(self.merchant_stock)
+        if count:
+            self.shop_index = (self.shop_index + delta) % count
+
+    def item_price(self, item: Item) -> int:
+        return shop_price(item, self.depth)
+
+    def shop_sell_price(self, item: Item) -> int:
+        return max(1, self.item_price(item) // 3)
+
+    def _damaged_gear(self) -> list[Item]:
+        seen: set[int] = set()
+        damaged: list[Item] = []
+        candidates = [
+            self.inventory.weapon,
+            self.inventory.armor,
+            *self.inventory.items,
+        ]
+        for item in candidates:
+            if item is None or id(item) in seen:
+                continue
+            seen.add(id(item))
+            if item.max_durability > 0 and item.durability < item.max_durability:
+                damaged.append(item)
+        return damaged
+
+    def repair_cost(self, item: Item) -> int:
+        missing = max(0, item.max_durability - item.durability)
+        if missing == 0:
+            return 0
+        return max(
+            1,
+            (missing + REPAIR_COST_DIVISOR - 1) // REPAIR_COST_DIVISOR,
+        )
+
+    def shop_repair_cost(self) -> int:
+        return sum(self.repair_cost(item) for item in self._damaged_gear())
+
+    def shop_repair_all(self) -> bool:
+        damaged = self._damaged_gear()
+        if not damaged:
+            self.msg("Your gear is already in good shape.", "good")
+            return False
+        cost = sum(self.repair_cost(item) for item in damaged)
+        if self.gold < cost:
+            self.msg(
+                f"A full repair costs {cost} gold; you have {self.gold}.",
+                "warn",
+            )
+            return False
+        self.gold -= cost
+        for item in damaged:
+            item.durability = item.max_durability
+        self.msg(
+            f"The merchant repairs {len(damaged)} item(s) "
+            f"for {cost} gold.",
+            "gold",
+        )
+        return True
+
+    def shop_buy(self, index: int) -> bool:
+        if not (0 <= index < len(self.merchant_stock)):
+            return False
+        stock_item = self.merchant_stock[index]
+        price = self.item_price(stock_item)
+        if self.gold < price:
+            self.msg(
+                f"You need {price} gold for the {stock_item.name}.",
+                "warn",
+            )
+            return False
+        piece = stock_item.copy()
+        piece.quantity = 1
+        if not self.inventory.add(piece):
+            self.msg("Your pack is full.", "warn")
+            return False
+        self.gold -= price
+        if stock_item.quantity > 1:
+            stock_item.quantity -= 1
+        else:
+            self.merchant_stock.pop(index)
+            self.shop_index = min(
+                self.shop_index,
+                max(0, len(self.merchant_stock) - 1),
+            )
+        self.msg(f"You buy {piece.name} for {price} gold.", "gold")
+        return True
+
+    def shop_sell_item(self, index: int) -> bool:
+        if not (0 <= index < len(self.inventory.items)):
+            return False
+        item = self.inventory.items[index]
+        price = self.shop_sell_price(item)
+        name = item.name
+        if item.quantity > 1:
+            item.quantity -= 1
+        else:
+            self.inventory.remove(index)
+        self.gold += price
+        self.msg(f"You sell {name} for {price} gold.", "gold")
+        return True
+
     def interact(self) -> bool:
-        """Взаимодействовать с мусоркой или сундуком рядом."""
+        """Взаимодействовать с мусоркой, сундуком или торговцем рядом."""
         if self.game_over:
             return False
+        if self.merchant_nearby():
+            self.open_shop()
+            return True
         if self.near_trash():
             self.open_trash()
             return True
@@ -794,6 +959,8 @@ class Game:
         if any((e.x, e.y) == (x, y) for e in self.enemies):
             return True
         if any((c.x, c.y) == (x, y) for c in self.chests):
+            return True
+        if self.merchant_pos == (x, y):
             return True
         if not ignore_items and any((i.x, i.y) == (x, y) for i in self.items):
             return True
@@ -1180,6 +1347,14 @@ class Game:
             self.attack(self.player, enemy)
             self.player_acted()
             return
+        if self.merchant_pos == (nx, ny):
+            if not self.merchant_noticed:
+                self.merchant_noticed = True
+                self.msg(
+                    "A merchant waits here. Press 'i' to trade.",
+                    "warn",
+                )
+            return
         chest = self.chest_at(nx, ny)
         if chest:
             if not self.chest_hinted:
@@ -1395,6 +1570,8 @@ class Game:
             cost[e.x, e.y] = 0
         for chest in self.chests:
             cost[chest.x, chest.y] = 0
+        if self.merchant_pos is not None:
+            cost[self.merchant_pos[0], self.merchant_pos[1]] = 0
         if self.trash_pos is not None:
             cost[self.trash_pos[0], self.trash_pos[1]] = 0
         cost[self.player.x, self.player.y] = 1
@@ -1518,6 +1695,7 @@ class Game:
                 and not self.enemy_at(nx, ny)
                 and not self.chest_at(nx, ny)
                 and (nx, ny) != self.trash_pos
+                and (nx, ny) != self.merchant_pos
             ):
                 e.x, e.y = nx, ny
 

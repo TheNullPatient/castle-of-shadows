@@ -316,6 +316,15 @@ def build_state(game: Any) -> dict[str, Any]:
             "items": [item_to_dict(item) for item in game.trash_items],
             "noticed": game.trash_noticed,
         },
+        "merchant": {
+            "pos": (
+                list(game.merchant_pos) if game.merchant_pos else None
+            ),
+            "stock": [
+                item_to_dict(item) for item in game.merchant_stock
+            ],
+            "noticed": game.merchant_noticed,
+        },
         "chests": [chest_to_dict(chest) for chest in game.chests],
         "special_rooms": [list(entry) for entry in game.special_rooms],
         "special_room_seen": [
@@ -402,6 +411,16 @@ def apply_state(game: Any, data: dict[str, Any]) -> None:
         item_from_dict(item) for item in trash.get("items", [])
     ]
     game.trash_noticed = bool(trash.get("noticed", False))
+
+    merchant = data.get("merchant", {})
+    mpos = merchant.get("pos")
+    game.merchant_pos = tuple(int(v) for v in mpos) if mpos else None
+    game.merchant_stock = [
+        item_from_dict(item) for item in merchant.get("stock", [])
+    ]
+    game.merchant_noticed = bool(merchant.get("noticed", False))
+    game.shop_index = 0
+    game.shop_sell_mode = False
 
     game.chests = [
         chest_from_dict(chest) for chest in data.get("chests", [])

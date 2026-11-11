@@ -22,6 +22,7 @@ from constants import (
     MODE_MENU,
     MODE_PAUSE,
     MODE_PLAYING,
+    MODE_SHOP,
     MODE_SLOTS,
     SCREEN_H,
     SCREEN_W,
@@ -330,6 +331,18 @@ def _repeatable_action(game: Game, sym: KeySym) -> bool:
             KeySym.K,
             KeySym.J,
         )
+    if game.mode == MODE_SHOP:
+        return (
+            not game.shop_sell_mode
+            and sym in (
+                KeySym.UP,
+                KeySym.DOWN,
+                KeySym.W,
+                KeySym.S,
+                KeySym.K,
+                KeySym.J,
+            )
+        )
     return False
 
 
@@ -365,6 +378,8 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return _handle_trash(game, event)
     if game.mode == MODE_CHEST:
         return _handle_chest(game, event)
+    if game.mode == MODE_SHOP:
+        return _handle_shop(game, event)
 
     sym = event.sym
     if sym == KeySym.ESCAPE:
@@ -594,6 +609,50 @@ def _handle_chest(game: Game, event: tcod.event.KeyDown) -> bool:
             game.take_from_chest(idx)
         else:
             game.msg("No item in that slot.")
+    return False
+
+
+def _handle_shop(game: Game, event: tcod.event.KeyDown) -> bool:
+    sym = event.sym
+    if game.shop_sell_mode:
+        if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
+            game.shop_sell_mode = False
+            return False
+        letter = _letter(event)
+        if letter:
+            idx = game.inventory.letter_index(letter)
+            if idx is None:
+                game.msg("No item in that slot.")
+                return False
+            game.shop_sell_item(idx)
+        return False
+    if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
+        game.close_shop()
+        return False
+    if sym in (KeySym.UP, KeySym.W, KeySym.K):
+        game.shop_move(-1)
+        return False
+    if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+        game.shop_move(1)
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        game.shop_buy(game.shop_index)
+        return False
+    if sym == KeySym.R:
+        game.shop_repair_all()
+        return False
+    letter = _letter(event)
+    if letter:
+        idx = ord(letter) - ord("a")
+        if idx < len(game.merchant_stock):
+            game.shop_index = idx
+            game.shop_buy(idx)
+        else:
+            game.msg("No item in that slot.")
+        return False
+    if sym in (KeySym.DELETE, KeySym.BACKSPACE):
+        game.shop_sell_mode = True
+        return False
     return False
 
 

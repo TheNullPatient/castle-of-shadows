@@ -24,9 +24,11 @@ from constants import (
     COLOR_HP_MID,
     COLOR_HP_OK,
     COLOR_MSG,
+    COLOR_MERCHANT,
     COLOR_PANEL,
     COLOR_PANEL_LIGHT,
     COLOR_PLAYER,
+    COLOR_SHOP_FLOOR,
     COLOR_SPAWN,
     COLOR_STAIRS,
     COLOR_TRASH,
@@ -42,10 +44,12 @@ from constants import (
     MAP_VIEW_H,
     MAP_VIEW_W,
     MAX_DEPTH,
+    MERCHANT_CHAR,
     MODE_CHEST,
     MODE_MAP,
     MODE_MENU,
     MODE_PAUSE,
+    MODE_SHOP,
     MODE_SLOTS,
     SCREEN_H,
     SCREEN_W,
@@ -64,11 +68,11 @@ HELP_ROWS = [
     ("Wait", ". or Space"),
     ("Pick up", "walk over an item (gold auto)"),
     ("Inventory", "Tab, then a-z to use / equip"),
-    ("Interact", "i: chest / trash nearby"),
+    ("Interact", "i: chest / trash / merchant nearby"),
     ("Throw away", "trash menu: Del, a-z (one at a time)"),
     ("Trash", "stand next to '%' and press i"),
-    ("Chests", "i near '=': a-z take, Del put (one)"),
-    ("Vaults", "gold/red rooms hide chests and guards"),
+    ("Chests", "i near '=' in vaults: a-z take, Del put"),
+    ("Shop", "i near '&': buy, R repair, Del sell"),
     ("Descend", "stand on '>' and press > or Enter"),
     ("Map", "large floors; camera follows; '<' spawn"),
     ("Map scroll", "use it, then reopen from inventory"),
@@ -140,6 +144,8 @@ def render(console: tcod.console.Console, game: Game) -> None:
         _render_trash(console, game)
     elif game.mode == MODE_CHEST:
         _render_chest(console, game)
+    elif game.mode == MODE_SHOP:
+        _render_shop(console, game)
     elif game.mode == MODE_PAUSE:
         _render_pause(console, game)
 
@@ -151,6 +157,8 @@ def _special_floor_color(kind: str | None) -> tuple[int, int, int] | None:
         return COLOR_GUARDED_FLOOR
     if kind == "camp":
         return COLOR_CAMP_FLOOR
+    if kind == "shop":
+        return COLOR_SHOP_FLOOR
     return None
 
 
@@ -256,13 +264,19 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
             color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
             _put(console, 1 + sx, 1 + sy, CHEST_CHAR, color, COLOR_BG)
 
+    merchant = game.merchant_pos
+    if merchant is not None and game.is_explored(merchant[0], merchant[1]):
+        sx, sy = merchant[0] - left, merchant[1] - top
+        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+            _put(console, 1 + sx, 1 + sy, MERCHANT_CHAR, COLOR_MERCHANT, COLOR_BG)
+
     player = game.player
     if player is not None:
         sx, sy = player.x - left, player.y - top
         if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
             _put(console, 1 + sx, 1 + sy, "@", COLOR_PLAYER, COLOR_BG)
 
-    legend = " < spawn   > stairs   @ you"
+    legend = " < spawn   > stairs   & merchant   @ you"
     console.print(1, SCREEN_H - 3, legend[:SCREEN_W - 2], fg=COLOR_DIM, bg=COLOR_BG)
     hint = "WASD/arrows scroll · PgUp/PgDn · Home center · Tab/Esc/i close"
     console.print(1, SCREEN_H - 2, hint[:SCREEN_W - 2], fg=COLOR_DIM, bg=COLOR_BG)
@@ -284,6 +298,15 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
         if game.is_visible(chest.x, chest.y):
             color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
             _put(console, chest.x - left, chest.y - top, CHEST_CHAR, color)
+    merchant = game.merchant_pos
+    if merchant is not None and game.is_visible(merchant[0], merchant[1]):
+        _put(
+            console,
+            merchant[0] - left,
+            merchant[1] - top,
+            MERCHANT_CHAR,
+            COLOR_MERCHANT,
+        )
     for item in game.items:
         if game.is_visible(item.x, item.y):
             _put(console, item.x - left, item.y - top, item.char, item.color)
@@ -630,6 +653,135 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
         x0 + 2,
         y0 + height - 2,
         "a-z take   Del put   ESC close"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_PANEL,
+    )
+
+
+def _render_shop(console: tcod.console.Console, game: Game) -> None:
+    if game.shop_sell_mode:
+        _render_shop_sell(console, game)
+        return
+    inventory = game.inventory
+    stock = game.merchant_stock
+    rows: list[tuple[str, tuple[int, int, int], int]] = []
+    for i, item in enumerate(stock):
+        price = game.item_price(item)
+        marker = ">" if i == game.shop_index else " "
+        rows.append(
+            (
+                f"{marker} {chr(ord('a') + i)}) {inventory.label(item)}  "
+                f"{price}g",
+                item.color,
+                price,
+            )
+        )
+    weapon = inventory.equipped_label(inventory.weapon)
+    armor = inventory.equipped_label(inventory.armor)
+    header = [
+        f"Weapon: {weapon}",
+        f"Armor:  {armor}",
+        "Buy:",
+    ]
+    longest = max(
+        [len(line) for line, _, _ in rows] + [len(line) for line in header] + [44]
+    )
+    width = min(VIEW_W, max(54, longest + 4))
+    height = min(VIEW_H, max(10, len(stock) + 8))
+    x0 = max(1, (VIEW_W - width) // 2)
+    y0 = max(1, (VIEW_H - height) // 2)
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=f" Merchant · {game.gold} gold ",
+        fg=COLOR_MERCHANT,
+        bg=COLOR_PANEL,
+        clear=True,
+    )
+    for i, line in enumerate(header):
+        console.print(
+            x0 + 2,
+            y0 + 1 + i,
+            line[: width - 4],
+            fg=COLOR_DIM if i == 2 else COLOR_UI,
+            bg=COLOR_PANEL,
+        )
+    if not rows:
+        console.print(
+            x0 + 2, y0 + 4, "(sold out)", fg=COLOR_DIM, bg=COLOR_PANEL
+        )
+    for i, (line, color, price) in enumerate(rows):
+        fg = color if price <= game.gold else COLOR_DIM
+        console.print(
+            x0 + 2,
+            y0 + 4 + i,
+            line[: width - 4],
+            fg=fg,
+            bg=COLOR_PANEL,
+        )
+    repair = game.shop_repair_cost()
+    repair_line = (
+        f"[R] Repair all gear ({repair}g)"
+        if repair
+        else "[R] Repair all gear (nothing damaged)"
+    )
+    console.print(
+        x0 + 2,
+        y0 + height - 3,
+        repair_line[: width - 4],
+        fg=COLOR_GOLD if repair else COLOR_DIM,
+        bg=COLOR_PANEL,
+    )
+    console.print(
+        x0 + 2,
+        y0 + height - 2,
+        "Enter/a-z buy   Del sell   Esc close"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_PANEL,
+    )
+
+
+def _render_shop_sell(console: tcod.console.Console, game: Game) -> None:
+    inventory = game.inventory
+    lines = []
+    for i, item in enumerate(inventory.items):
+        price = game.shop_sell_price(item)
+        code = chr(ord("a") + i)
+        lines.append(
+            (f" {code}) {inventory.label(item)}  {price}g", item.color)
+        )
+    width = _container_width(lines)
+    height = min(VIEW_H, max(7, len(lines) + 5))
+    x0 = max(1, (VIEW_W - width) // 2)
+    y0 = max(1, (VIEW_H - height) // 2)
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=f" Sell items · {game.gold} gold ",
+        fg=COLOR_MERCHANT,
+        bg=COLOR_PANEL,
+        clear=True,
+    )
+    if not lines:
+        console.print(
+            x0 + 2, y0 + 2, "(empty)", fg=COLOR_DIM, bg=COLOR_PANEL
+        )
+    for i, (line, color) in enumerate(lines):
+        console.print(
+            x0 + 2,
+            y0 + 2 + i,
+            line[: width - 4],
+            fg=color,
+            bg=COLOR_PANEL,
+        )
+    console.print(
+        x0 + 2,
+        y0 + height - 2,
+        "a-z sell one   ESC done"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
