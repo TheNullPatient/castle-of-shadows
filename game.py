@@ -10,6 +10,7 @@ from tcod.constants import FOV_SYMMETRIC_SHADOWCAST
 
 from constants import (
     AGGRO_RANGE,
+    ALTAR_HEAL_RATIO,
     ARMOR_WEAR_PER_HIT,
     BIOME_NAMES,
     biome_index,
@@ -59,7 +60,21 @@ from constants import (
     POISON_TURNS,
     PLAYER_RANGED_RANGE,
     REPAIR_COST_DIVISOR,
+    SEARCH_RADIUS,
+    SECRET_DOOR_CHAR,
+    SECRET_ROOM_CHANCE,
+    SECRET_ROOM_EXTRA_CHANCE,
+    SECRET_ROOM_EXTRA_DEPTH,
     SUMMON_COOLDOWN,
+    TRAP_BASE_COUNT,
+    TRAP_DART_DAMAGE_BASE,
+    TRAP_DART_DAMAGE_PER_DEPTH,
+    TRAP_MAX,
+    TRAP_PER_DEPTH,
+    TRAP_POISON_TURNS_BASE,
+    TRAP_POISON_TURNS_PER_DEPTH,
+    TRAP_SPIKE_DAMAGE_BASE,
+    TRAP_SPIKE_DAMAGE_PER_DEPTH,
     TRASH_CAPACITY,
     TRASH_CHAR,
     TRASH_LOOT_CHANCE,
@@ -75,6 +90,7 @@ from entities import (
     Chest,
     Entity,
     Item,
+    Trap,
     age_trash_gear,
     enemy_pool,
     make_boss,
@@ -114,6 +130,8 @@ SPECIAL_ROOM_TEXT = {
     "guarded": "You enter a guarded vault. Something stirs in the dark.",
     "camp": "You enter an abandoned camp. Leftovers lie scattered around.",
     "shop": "You enter a trading post. A merchant waits by a lantern.",
+    "secret": "You discover a hidden chamber.",
+    "shrine": "You enter a silent shrine. An altar glows faintly.",
 }
 
 
@@ -198,6 +216,11 @@ class Game:
         self.merchant_noticed = False
         self.shop_index = 0
         self.shop_sell_mode = False
+        self.traps: list[Trap] = []
+        self.secret_doors: set[tuple[int, int]] = set()
+        self.secret_hinted = False
+        self.altar_pos: tuple[int, int] | None = None
+        self.altar_used = False
         self.special_rooms: list[tuple[int, int, int, int, str]] = []
         self.special_room_seen: set[tuple[int, int, int, int]] = set()
         self.spawn = (0, 0)
@@ -415,6 +438,11 @@ class Game:
         self.merchant_noticed = False
         self.shop_index = 0
         self.shop_sell_mode = False
+        self.traps = []
+        self.secret_doors = set()
+        self.secret_hinted = False
+        self.altar_pos = None
+        self.altar_used = False
         self.special_rooms = []
         self.special_room_seen = set()
         self.trash_items = []
@@ -427,6 +455,8 @@ class Game:
         self._spawn_items()
         self._spawn_trash_loot()
         self._spawn_boss()
+        self._place_secrets()
+        self._place_traps()
         if not first and biome_index(self.depth) != biome_index(self.depth - 1):
             self.msg(
                 f"You enter the {BIOME_NAMES[biome_index(self.depth)]}.",
@@ -476,7 +506,7 @@ class Game:
         return pos
 
     def _prepare_special_rooms(self) -> None:
-        """Сделать 1-2 комнаты особыми: сокровищница, засада или лагерь."""
+        """Сделать 1-2 комнаты особыми: сокровищница, засада, лагерь, алтарь."""
         rooms = self.dungeon.rooms
         if len(rooms) < 3:
             return
@@ -498,9 +528,11 @@ class Game:
         for idx in random.sample(candidates, min(count, len(candidates))):
             room = rooms[idx]
             kind = random.choices(
-                ("vault", "guarded", "camp"),
-                weights=(0.45, 0.35, 0.20),
+                ("vault", "guarded", "camp", "shrine"),
+                weights=(0.36, 0.27, 0.17, 0.20),
             )[0]
+            if kind == "shrine" and self.altar_pos is not None:
+                kind = "camp"
             self.special_rooms.append((*room, kind))
             if kind in ("vault", "guarded"):
                 self._place_chest(room, guarded=kind == "guarded")
@@ -511,6 +543,10 @@ class Game:
                 pos = self._free_spot_in_room(room)
                 if pos is not None:
                     self.items.append(random_loot(pos[0], pos[1], self.depth))
+            elif kind == "shrine":
+                pos = self._free_spot_in_room(room)
+                if pos is not None:
+                    self.altar_pos = pos
             else:
                 for _ in range(random.randint(2, 3)):
                     pos = self._free_spot_in_room(room)
@@ -549,15 +585,302 @@ class Game:
         room: tuple[int, int, int, int],
     ) -> tuple[int, int] | None:
         x, y, w, h = room
+        # Не занимаем клетки у стен: там могут начинаться коридоры.
+        xs = range(x + 1, x + w - 1) if w > 2 else range(x, x + w)
+        ys = range(y + 1, y + h - 1) if h > 2 else range(y, y + h)
         for _ in range(40):
-            px = x + random.randint(0, w - 1)
-            py = y + random.randint(0, h - 1)
+            px = random.choice(xs)
+            py = random.choice(ys)
             if (px, py) in (self.stairs, self.trash_pos):
                 continue
             if self.chest_at(px, py) or self._occupied(px, py):
                 continue
             return px, py
         return None
+
+    # --- секретные комнаты -------------------------------------------------
+
+    def _place_secrets(self) -> None:
+        """Спрятать 0-2 комнаты за потайными дверями."""
+        rooms = [
+            room
+            for room in self.dungeon.rooms[1:-1]
+            if not self._is_special_room(room)
+        ]
+        if not rooms:
+            return
+        random.shuffle(rooms)
+        count = 1 if random.random() < SECRET_ROOM_CHANCE else 0
+        if (
+            count
+            and self.depth >= SECRET_ROOM_EXTRA_DEPTH
+            and random.random() < SECRET_ROOM_EXTRA_CHANCE
+        ):
+            count += 1
+        built = 0
+        for room in rooms:
+            if built >= count:
+                break
+            if self._carve_secret_room(room):
+                built += 1
+
+    def _carve_secret_room(
+        self,
+        room: tuple[int, int, int, int],
+    ) -> bool:
+        """Пристроить к комнате камеру 2x2/3x3 за фальшивой стеной."""
+        x, y, w, h = room
+        if w < 4 or h < 4:
+            return False
+        directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+        random.shuffle(directions)
+        for dx, dy in directions:
+            if dx == 0:
+                door = (
+                    random.randint(x + 1, x + w - 2),
+                    y - 1 if dy < 0 else y + h,
+                )
+                cw = min(random.choice((2, 3)), w - 2)
+                ch = 2
+                offset = random.randint(0, cw - 1)
+                rect = (
+                    door[0] - offset,
+                    door[1] - ch if dy < 0 else door[1] + 1,
+                    cw,
+                    ch,
+                )
+            else:
+                door = (
+                    x - 1 if dx < 0 else x + w,
+                    random.randint(y + 1, y + h - 2),
+                )
+                cw = 2
+                ch = min(random.choice((2, 3)), h - 2)
+                offset = random.randint(0, ch - 1)
+                rect = (
+                    door[0] - cw if dx < 0 else door[0] + 1,
+                    door[1] - offset,
+                    cw,
+                    ch,
+                )
+            if self._secret_room_fits(rect, door):
+                self._build_secret_room(rect, door)
+                return True
+        return False
+
+    def _secret_room_fits(
+        self,
+        rect: tuple[int, int, int, int],
+        door: tuple[int, int],
+    ) -> bool:
+        """Камера должна целиком лежать в камне, а вокруг неё — только стены."""
+        x, y, w, h = rect
+        cells = [
+            (cx, cy)
+            for cy in range(y, y + h)
+            for cx in range(x, x + w)
+        ]
+        allowed = set(cells) | {door}
+        grid = self.dungeon.grid
+        for cx, cy in cells:
+            if not self.dungeon.in_bounds(cx, cy):
+                return False
+            if grid[cy][cx] != "#":
+                return False
+        dx, dy = door
+        if not self.dungeon.in_bounds(dx, dy) or grid[dy][dx] != "#":
+            return False
+        for cx, cy in cells:
+            for nx in (cx - 1, cx, cx + 1):
+                for ny in (cy - 1, cy, cy + 1):
+                    if (nx, ny) in allowed:
+                        continue
+                    if not self.dungeon.in_bounds(nx, ny):
+                        return False
+                    if grid[ny][nx] != "#":
+                        return False
+        return True
+
+    def _build_secret_room(
+        self,
+        rect: tuple[int, int, int, int],
+        door: tuple[int, int],
+    ) -> None:
+        x, y, w, h = rect
+        cells = [
+            (cx, cy)
+            for cy in range(y, y + h)
+            for cx in range(x, x + w)
+        ]
+        for cx, cy in cells:
+            self.dungeon.grid[cy][cx] = "."
+        self.secret_doors.add(door)
+        self.special_rooms.append((*rect, "secret"))
+        entry = next(
+            (
+                cell
+                for cell in cells
+                if max(
+                    abs(cell[0] - door[0]),
+                    abs(cell[1] - door[1]),
+                )
+                == 1
+            ),
+            cells[0],
+        )
+        if random.random() < 0.55:
+            cx, cy = random.choice(
+                [cell for cell in cells if cell != entry] or cells
+            )
+            self.chests.append(
+                Chest(
+                    cx,
+                    cy,
+                    items=make_chest_loot(self.depth),
+                )
+            )
+            return
+        spots = random.sample(cells, k=min(len(cells), random.randint(2, 3)))
+        for spot in spots:
+            self.items.append(random_loot(spot[0], spot[1], self.depth))
+        free = [cell for cell in cells if cell not in spots]
+        if free:
+            gx, gy = random.choice(free)
+            self.items.append(
+                Item(
+                    "Gold",
+                    "$",
+                    "gold",
+                    COLOR_GOLD,
+                    gx,
+                    gy,
+                    random.randint(10 + self.depth * 2, 20 + self.depth * 4),
+                )
+            )
+
+    # --- напольные ловушки -------------------------------------------------
+
+    def _place_traps(self) -> None:
+        """Скрытые ловушки в комнатах и коридорах, но не в особых комнатах."""
+        count = min(
+            TRAP_MAX,
+            TRAP_BASE_COUNT + self.depth // TRAP_PER_DEPTH,
+        )
+        candidates: list[tuple[int, int]] = []
+        for y in range(self.dungeon.h):
+            for x in range(self.dungeon.w):
+                if self.dungeon.grid[y][x] != ".":
+                    continue
+                if self.special_room_at(x, y) is not None:
+                    continue
+                if (x, y) == self.spawn or (x, y) == self.stairs:
+                    continue
+                if (x, y) in (self.trash_pos, self.merchant_pos):
+                    continue
+                if max(abs(x - self.spawn[0]), abs(y - self.spawn[1])) <= 1:
+                    continue
+                if self.chest_at(x, y) or self._occupied(x, y):
+                    continue
+                candidates.append((x, y))
+        if not candidates:
+            return
+        kinds = ("spikes", "poison", "dart", "teleport")
+        weights = (0.45, 0.28, 0.17, 0.10)
+        for pos in random.sample(candidates, min(count, len(candidates))):
+            kind = random.choices(kinds, weights=weights)[0]
+            self.traps.append(Trap(pos[0], pos[1], kind))
+
+    def trap_at(self, x: int, y: int) -> Trap | None:
+        return next(
+            (
+                trap
+                for trap in self.traps
+                if (trap.x, trap.y) == (x, y) and trap.armed
+            ),
+            None,
+        )
+
+    def _spring_floor_trap(self) -> None:
+        trap = self.trap_at(self.player.x, self.player.y)
+        if trap is None:
+            return
+        trap.revealed = True
+        trap.armed = False
+        if trap.kind == "spikes":
+            dmg = (
+                TRAP_SPIKE_DAMAGE_BASE
+                + self.depth // TRAP_SPIKE_DAMAGE_PER_DEPTH
+            )
+            self.msg(f"Hidden spikes stab you for {dmg}!", "warn")
+            self._hurt_player(dmg, "hidden spikes", wear_armor=False)
+        elif trap.kind == "dart":
+            dmg = (
+                TRAP_DART_DAMAGE_BASE
+                + self.depth // TRAP_DART_DAMAGE_PER_DEPTH
+            )
+            self.msg(f"A dart trap fires at you for {dmg}!", "warn")
+            self._hurt_player(dmg, "a dart trap", wear_armor=False)
+        elif trap.kind == "poison":
+            turns = (
+                TRAP_POISON_TURNS_BASE
+                + self.depth // TRAP_POISON_TURNS_PER_DEPTH
+            )
+            self._poison_from_trap("a poison needle", turns)
+        else:
+            self.msg("A teleport rune flares under your feet!", "warn")
+            if not self.teleport_player():
+                self.msg("But the magic fizzles.", "warn")
+
+    def search(self) -> bool:
+        """Поиск: открыть потайные двери и заметить ловушки рядом."""
+        if self.game_over or self.player is None:
+            return False
+        px, py = self.player.x, self.player.y
+        traps_found = 0
+        for trap in self.traps:
+            if trap.revealed:
+                continue
+            if max(abs(trap.x - px), abs(trap.y - py)) <= SEARCH_RADIUS:
+                trap.revealed = True
+                traps_found += 1
+        doors_found = 0
+        for door in sorted(self.secret_doors):
+            if max(abs(door[0] - px), abs(door[1] - py)) <= SEARCH_RADIUS:
+                self._reveal_secret_door(door)
+                doors_found += 1
+        if doors_found:
+            self.msg(
+                f"You reveal {doors_found} secret door(s) in the wall!",
+                "good",
+            )
+        if traps_found:
+            self.msg(f"You spot {traps_found} hidden trap(s).", "warn")
+        if not doors_found and not traps_found:
+            self.msg("You search the area but find nothing.", "warn")
+        self.player_acted()
+        return True
+
+    def _reveal_secret_door(self, door: tuple[int, int]) -> None:
+        x, y = door
+        self.secret_doors.discard(door)
+        if self.dungeon.in_bounds(x, y) and self.dungeon.grid[y][x] == "#":
+            self.dungeon.grid[y][x] = SECRET_DOOR_CHAR
+
+    def _notice_secret_door(self) -> None:
+        """Один раз за этаж подсказать, что рядом есть фальшивая стена."""
+        if self.secret_hinted or not self.secret_doors or self.player is None:
+            return
+        px, py = self.player.x, self.player.y
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if (px + dx, py + dy) in self.secret_doors:
+                    self.secret_hinted = True
+                    self.msg(
+                        "A cold draft slips from the wall nearby. "
+                        "Press 'x' to search.",
+                        "warn",
+                    )
+                    return
 
     def _place_chest(
         self,
@@ -738,6 +1061,47 @@ class Game:
             abs(self.merchant_pos[1] - self.player.y),
         ) == 1
 
+    def altar_nearby(self) -> bool:
+        if self.player is None or self.altar_pos is None:
+            return False
+        return max(
+            abs(self.altar_pos[0] - self.player.x),
+            abs(self.altar_pos[1] - self.player.y),
+        ) == 1
+
+    def use_altar(self) -> bool:
+        """Одно благословение за алтарь: лечение, antidote или +1 max HP."""
+        if self.altar_pos is None or not self.altar_nearby():
+            self.msg("There is no altar nearby.", "warn")
+            return False
+        if self.altar_used:
+            self.msg("The altar is silent now.", "warn")
+            return False
+        self.altar_used = True
+        healed = self._heal_player(
+            max(1, int(self.player.max_hp * ALTAR_HEAL_RATIO))
+        )
+        cured = self.cure_poison()
+        if healed:
+            if cured:
+                self.msg(
+                    f"The altar restores {healed} HP and purifies your blood.",
+                    "heal",
+                )
+            else:
+                self.msg(f"The altar restores {healed} HP.", "heal")
+        elif cured:
+            self.msg("The altar purifies your blood.", "heal")
+        else:
+            self.player.max_hp += 1
+            self.player.hp += 1
+            self.msg(
+                "The altar grants you a sliver of life (+1 max HP).",
+                "good",
+            )
+        self.player_acted()
+        return True
+
     def open_shop(self) -> None:
         self.mode = MODE_SHOP
         self.shop_index = 0
@@ -859,6 +1223,9 @@ class Game:
         if self.merchant_nearby():
             self.open_shop()
             return True
+        if self.altar_nearby():
+            self.use_altar()
+            return True
         if self.near_trash():
             self.open_trash()
             return True
@@ -961,6 +1328,8 @@ class Game:
         if any((c.x, c.y) == (x, y) for c in self.chests):
             return True
         if self.merchant_pos == (x, y):
+            return True
+        if self.altar_pos == (x, y):
             return True
         if not ignore_items and any((i.x, i.y) == (x, y) for i in self.items):
             return True
@@ -1246,6 +1615,24 @@ class Game:
                 "warn",
             )
 
+    def _poison_from_trap(self, source: str, turns: int) -> None:
+        if self.game_over:
+            return
+        was_poisoned = self.poison_turns > 0
+        self.poison_turns = max(self.poison_turns, turns)
+        self.poison_damage = max(self.poison_damage, self.poison_strength)
+        if was_poisoned:
+            self.msg(
+                f"The poison burns again ({self.poison_turns} turns).",
+                "warn",
+            )
+        else:
+            self.msg(
+                f"You are poisoned by {source}! "
+                f"({self.poison_turns} turns)",
+                "warn",
+            )
+
     def cure_poison(self) -> bool:
         if self.poison_turns <= 0:
             return False
@@ -1332,6 +1719,7 @@ class Game:
             return
         self.turns += 1
         self._notice_special_room()
+        self._notice_secret_door()
         self.enemy_turn()
         if not self.game_over:
             self._poison_tick()
@@ -1355,6 +1743,9 @@ class Game:
                     "warn",
                 )
             return
+        if self.altar_pos == (nx, ny):
+            self.msg("An altar stands here. Press 'i' to pray.", "warn")
+            return
         chest = self.chest_at(nx, ny)
         if chest:
             if not self.chest_hinted:
@@ -1377,7 +1768,10 @@ class Game:
         if not self.walkable(nx, ny):
             return
         self.player.x, self.player.y = nx, ny
-        item = self.item_at(nx, ny)
+        self._spring_floor_trap()
+        if self.game_over:
+            return
+        item = self.item_at(self.player.x, self.player.y)
         if item:
             self.pickup(item)
         self.player_acted()
@@ -1491,6 +1885,11 @@ class Game:
                     self.walkable(x, y)
                     and not self.enemy_at(x, y)
                     and not self.chest_at(x, y)
+                    and (x, y) not in (self.trash_pos, self.merchant_pos)
+                    and (x, y) != self.altar_pos
+                    and not any(
+                        (trap.x, trap.y) == (x, y) for trap in self.traps
+                    )
                     and (x, y) != (self.player.x, self.player.y)
                 ):
                     spots.append((x, y))
@@ -1572,6 +1971,8 @@ class Game:
             cost[chest.x, chest.y] = 0
         if self.merchant_pos is not None:
             cost[self.merchant_pos[0], self.merchant_pos[1]] = 0
+        if self.altar_pos is not None:
+            cost[self.altar_pos[0], self.altar_pos[1]] = 0
         if self.trash_pos is not None:
             cost[self.trash_pos[0], self.trash_pos[1]] = 0
         cost[self.player.x, self.player.y] = 1
@@ -1696,6 +2097,7 @@ class Game:
                 and not self.chest_at(nx, ny)
                 and (nx, ny) != self.trash_pos
                 and (nx, ny) != self.merchant_pos
+                and (nx, ny) != self.altar_pos
             ):
                 e.x, e.y = nx, ny
 

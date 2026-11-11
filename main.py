@@ -400,6 +400,9 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
     if sym == KeySym.F:
         game.fire_ranged()
         return False
+    if sym == KeySym.X:
+        game.search()
+        return False
     if sym in MOVE_KEYS:
         dx, dy = MOVE_KEYS[sym]
         game.move(dx, dy)

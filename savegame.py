@@ -18,7 +18,7 @@ from constants import (
     ROOT,
 )
 from dungeon import Dungeon
-from entities import Chest, Entity, Item
+from entities import Chest, Entity, Item, Trap
 
 SAVE_DIR = ROOT / "saves"
 SAVE_VERSION = 1
@@ -271,6 +271,26 @@ def chest_from_dict(data: dict[str, Any]) -> Chest:
     )
 
 
+def trap_to_dict(trap: Trap) -> dict[str, Any]:
+    return {
+        "x": trap.x,
+        "y": trap.y,
+        "kind": trap.kind,
+        "revealed": trap.revealed,
+        "armed": trap.armed,
+    }
+
+
+def trap_from_dict(data: dict[str, Any]) -> Trap:
+    return Trap(
+        int(data["x"]),
+        int(data["y"]),
+        str(data.get("kind", "spikes")),
+        bool(data.get("revealed", False)),
+        bool(data.get("armed", True)),
+    )
+
+
 # --- снимок и восстановление игры ------------------------------------------
 
 
@@ -326,6 +346,15 @@ def build_state(game: Any) -> dict[str, Any]:
             "noticed": game.merchant_noticed,
         },
         "chests": [chest_to_dict(chest) for chest in game.chests],
+        "traps": [trap_to_dict(trap) for trap in game.traps],
+        "secrets": {
+            "doors": [list(door) for door in sorted(game.secret_doors)],
+            "hinted": game.secret_hinted,
+        },
+        "altar": {
+            "pos": list(game.altar_pos) if game.altar_pos else None,
+            "used": game.altar_used,
+        },
         "special_rooms": [list(entry) for entry in game.special_rooms],
         "special_room_seen": [
             list(entry) for entry in game.special_room_seen
@@ -425,6 +454,19 @@ def apply_state(game: Any, data: dict[str, Any]) -> None:
     game.chests = [
         chest_from_dict(chest) for chest in data.get("chests", [])
     ]
+    game.traps = [
+        trap_from_dict(trap) for trap in data.get("traps", [])
+    ]
+    secrets = data.get("secrets", {})
+    game.secret_doors = {
+        (int(door[0]), int(door[1]))
+        for door in secrets.get("doors", [])
+    }
+    game.secret_hinted = bool(secrets.get("hinted", False))
+    altar = data.get("altar", {})
+    apos = altar.get("pos")
+    game.altar_pos = tuple(int(v) for v in apos) if apos else None
+    game.altar_used = bool(altar.get("used", False))
     game.special_rooms = [
         (*[int(v) for v in entry[:4]], str(entry[4]))
         for entry in data.get("special_rooms", [])

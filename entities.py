@@ -128,6 +128,17 @@ class Chest:
     items: list[Item] = field(default_factory=list)
 
 
+@dataclass
+class Trap:
+    """Напольная ловушка. Скрыта, пока не сработает или её не найдут."""
+
+    x: int
+    y: int
+    kind: str
+    revealed: bool = False
+    armed: bool = True
+
+
 ENEMY_TYPES = [
     ("r", "Rat", 4, 2, 0, 2, 0, "melee"),
     ("b", "Bat", 3, 2, 0, 2, 0, "fast"),

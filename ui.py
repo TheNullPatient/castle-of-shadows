@@ -7,11 +7,13 @@ from datetime import datetime
 import tcod.console
 
 from constants import (
+    ALTAR_CHAR,
     CHEST_CAPACITY,
     CHEST_CHAR,
     BIOME_COLORS,
     BIOME_NAMES,
     biome_index,
+    COLOR_ALTAR,
     COLOR_BG,
     COLOR_CAMP_FLOOR,
     COLOR_CHEST,
@@ -28,9 +30,14 @@ from constants import (
     COLOR_PANEL,
     COLOR_PANEL_LIGHT,
     COLOR_PLAYER,
+    COLOR_SECRET_DOOR,
+    COLOR_SECRET_FLOOR,
     COLOR_SHOP_FLOOR,
+    COLOR_SHRINE_FLOOR,
     COLOR_SPAWN,
     COLOR_STAIRS,
+    COLOR_TRAP,
+    COLOR_TRAP_SPENT,
     COLOR_TRASH,
     COLOR_TRASH_DARK,
     COLOR_UI,
@@ -53,7 +60,9 @@ from constants import (
     MODE_SLOTS,
     SCREEN_H,
     SCREEN_W,
+    SECRET_DOOR_CHAR,
     STATUS_Y,
+    TRAP_CHAR,
     TRASH_CAPACITY,
     TRASH_CHAR,
     VIEW_H,
@@ -65,13 +74,15 @@ HELP_ROWS = [
     ("Move", "WASD / arrows / hjkl"),
     ("Attack", "bump into an enemy"),
     ("Shoot", "f: bow hits nearest foe in range"),
+    ("Search", "x: find traps / secret doors nearby"),
     ("Wait", ". or Space"),
     ("Pick up", "walk over an item (gold auto)"),
     ("Inventory", "Tab, then a-z to use / equip"),
-    ("Interact", "i: chest / trash / merchant nearby"),
+    ("Interact", "i: chest / trash / merchant / altar nearby"),
     ("Throw away", "trash menu: Del, a-z (one at a time)"),
     ("Trash", "stand next to '%' and press i"),
     ("Chests", "i near '=' in vaults: a-z take, Del put"),
+    ("Altar", "i near '_': heal, cure, or +1 max HP"),
     ("Shop", "i near '&': buy, R repair, Del sell"),
     ("Descend", "stand on '>' and press > or Enter"),
     ("Map", "large floors; camera follows; '<' spawn"),
@@ -159,6 +170,10 @@ def _special_floor_color(kind: str | None) -> tuple[int, int, int] | None:
         return COLOR_CAMP_FLOOR
     if kind == "shop":
         return COLOR_SHOP_FLOOR
+    if kind == "secret":
+        return COLOR_SECRET_FLOOR
+    if kind == "shrine":
+        return COLOR_SHRINE_FLOOR
     return None
 
 
@@ -187,6 +202,8 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     fg = _tint(wall_color, light)
                 elif ch == ">":
                     fg = _tint(COLOR_STAIRS, 0.75 + light * 0.25)
+                elif ch == SECRET_DOOR_CHAR:
+                    fg = _tint(COLOR_SECRET_DOOR, 0.75 + light * 0.25)
                 elif ch == TRASH_CHAR:
                     fg = _tint(COLOR_TRASH, 0.75 + light * 0.25)
                 else:
@@ -197,6 +214,8 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     fg = _tint(wall_color, 0.28)
                 elif ch == ">":
                     fg = (40, 90, 55)
+                elif ch == SECRET_DOOR_CHAR:
+                    fg = _tint(COLOR_SECRET_DOOR, 0.28)
                 elif ch == TRASH_CHAR:
                     fg = COLOR_TRASH_DARK
                 elif special:
@@ -242,6 +261,8 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
                 fg = _tint(wall_color, 0.62 if visible else 0.42)
             elif ch == ">":
                 fg = COLOR_STAIRS
+            elif ch == SECRET_DOOR_CHAR:
+                fg = _tint(COLOR_SECRET_DOOR, 0.75 if visible else 0.50)
             elif ch == TRASH_CHAR:
                 fg = COLOR_TRASH
             elif special:
@@ -270,13 +291,36 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
         if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
             _put(console, 1 + sx, 1 + sy, MERCHANT_CHAR, COLOR_MERCHANT, COLOR_BG)
 
+    altar = game.altar_pos
+    if altar is not None and game.is_explored(altar[0], altar[1]):
+        sx, sy = altar[0] - left, altar[1] - top
+        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+            color = COLOR_ALTAR if not game.altar_used else COLOR_DIM
+            _put(console, 1 + sx, 1 + sy, ALTAR_CHAR, color, COLOR_BG)
+
+    for trap in game.traps:
+        if not trap.revealed or not game.is_explored(trap.x, trap.y):
+            continue
+        sx, sy = trap.x - left, trap.y - top
+        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+            color = COLOR_TRAP if trap.armed else COLOR_TRAP_SPENT
+            visible = game.is_visible(trap.x, trap.y)
+            _put(
+                console,
+                1 + sx,
+                1 + sy,
+                TRAP_CHAR,
+                _tint(color, 0.85 if visible else 0.55),
+                COLOR_BG,
+            )
+
     player = game.player
     if player is not None:
         sx, sy = player.x - left, player.y - top
         if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
             _put(console, 1 + sx, 1 + sy, "@", COLOR_PLAYER, COLOR_BG)
 
-    legend = " < spawn   > stairs   & merchant   @ you"
+    legend = " < spawn   > stairs   & merchant   _ altar   ^ trap   @ you"
     console.print(1, SCREEN_H - 3, legend[:SCREEN_W - 2], fg=COLOR_DIM, bg=COLOR_BG)
     hint = "WASD/arrows scroll · PgUp/PgDn · Home center · Tab/Esc/i close"
     console.print(1, SCREEN_H - 2, hint[:SCREEN_W - 2], fg=COLOR_DIM, bg=COLOR_BG)
@@ -307,9 +351,33 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
             MERCHANT_CHAR,
             COLOR_MERCHANT,
         )
+    altar = game.altar_pos
+    if altar is not None and game.is_visible(altar[0], altar[1]):
+        color = COLOR_ALTAR if not game.altar_used else COLOR_DIM
+        _put(
+            console,
+            altar[0] - left,
+            altar[1] - top,
+            ALTAR_CHAR,
+            color,
+        )
     for item in game.items:
         if game.is_visible(item.x, item.y):
             _put(console, item.x - left, item.y - top, item.char, item.color)
+    for trap in game.traps:
+        if not trap.revealed or not game.is_explored(trap.x, trap.y):
+            continue
+        if game.is_visible(trap.x, trap.y):
+            color = COLOR_TRAP if trap.armed else COLOR_TRAP_SPENT
+        else:
+            color = _tint(COLOR_TRAP_SPENT, 0.55)
+        _put(
+            console,
+            trap.x - left,
+            trap.y - top,
+            TRAP_CHAR,
+            color,
+        )
     for enemy in game.enemies:
         if not game.is_visible(enemy.x, enemy.y):
             continue
@@ -425,7 +493,7 @@ def _render_hint(console: tcod.console.Console) -> None:
         (" wait", COLOR_DIM),
         (" · ", COLOR_DIM),
         ("f", COLOR_UI),
-        (" fire", COLOR_DIM),
+        (" bow", COLOR_DIM),
         (" · ", COLOR_DIM),
         ("Tab", COLOR_UI),
         (" inv", COLOR_DIM),
@@ -433,14 +501,11 @@ def _render_hint(console: tcod.console.Console) -> None:
         ("i", COLOR_UI),
         (" use", COLOR_DIM),
         (" · ", COLOR_DIM),
-        (">", COLOR_UI),
-        (" down", COLOR_DIM),
+        ("x", COLOR_UI),
+        (" search", COLOR_DIM),
         (" · ", COLOR_DIM),
         ("?", COLOR_UI),
         (" help", COLOR_DIM),
-        (" · ", COLOR_DIM),
-        ("Esc", COLOR_UI),
-        (" menu", COLOR_DIM),
     ]
     _print_segments(console, 0, HINT_Y, segments, COLOR_PANEL, SCREEN_W)
 
