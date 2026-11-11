@@ -11,6 +11,10 @@ TILESET_PATH = ASSET_DIR / "dejavu16x16_gs_tc.png"
 TILE_W = 12
 TILE_H = 20
 
+# Автоповтор клавиш (секунды): общий для всех систем и будущего ticking-режима.
+KEY_REPEAT_DELAY = 0.30
+KEY_REPEAT_INTERVAL = 0.12
+
 # Видимая область карты (один «экран») и размер самого этажа. Этаж больше
 # экрана: камера следует за игроком, а FOV и сохранения работают в мировых
 # координатах.
@@ -75,7 +79,7 @@ ARMOR_WEAR_PER_HIT = 2
 
 # Поведение врагов.
 ENEMY_RANGED_RANGE = 6
-POISON_TURNS = 3
+POISON_TURNS = 6
 POISON_DAMAGE = 1
 SUMMON_COOLDOWN = 5
 MAX_ENEMIES = 14

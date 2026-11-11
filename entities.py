@@ -143,6 +143,26 @@ ENEMY_COLORS = {
 
 ENEMY_BY_NAME = {kind[1]: kind for kind in ENEMY_TYPES}
 
+# (износ оружия при ударе по врагу, износ брони при его попадании по игроку).
+# Тяжёлые и бронированные противники быстрее портят снаряжение.
+ENEMY_GEAR_WEAR = {
+    "Rat": (1, 2),
+    "Bat": (1, 2),
+    "Goblin": (1, 2),
+    "Skeleton": (2, 2),
+    "Orc": (1, 3),
+    "Giant Spider": (1, 2),
+    "Cultist": (1, 2),
+    "Troll": (2, 3),
+    "Stone Golem": (3, 3),
+    "Dragon": (2, 4),
+    "Skeleton King": (2, 3),
+    "Troll Chieftain": (2, 4),
+    "Wyvern": (3, 4),
+    "Lich": (2, 3),
+    "Shadow Lord": (3, 4),
+}
+
 # Боссы биомов: появляются на этажах 5, 10, 15, 20 и 25 и охраняют лестницу.
 BOSS_TYPES = [
     ("K", "Skeleton King", 45, 8, 3, 35, 5, "summoner"),

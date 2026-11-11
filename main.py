@@ -2,6 +2,9 @@
 """Castle of Shadows — tcod entry point."""
 from __future__ import annotations
 
+import time
+import types
+
 import numpy as np
 import tcod
 import tcod.context
@@ -10,12 +13,15 @@ import tcod.event
 from tcod.event import KeySym
 
 from constants import (
+    KEY_REPEAT_DELAY,
+    KEY_REPEAT_INTERVAL,
     LOG_H,
     MAP_VIEW_H,
     MODE_CHEST,
     MODE_MAP,
     MODE_MENU,
     MODE_PAUSE,
+    MODE_PLAYING,
     MODE_SLOTS,
     SCREEN_H,
     SCREEN_W,
@@ -167,6 +173,126 @@ def _letter(event: tcod.event.KeyDown) -> str | None:
     if ord("A") <= value <= ord("Z"):
         return chr(value + 32)
     return None
+
+
+LOG_SCROLL_KEYS = {
+    KeySym.PAGEUP,
+    KeySym.PAGEDOWN,
+    KeySym.MINUS,
+    KeySym.KP_MINUS,
+    KeySym.EQUALS,
+    KeySym.KP_PLUS,
+    KeySym.PLUS,
+}
+
+REPEATABLE_KEYS = (
+    set(MOVE_KEYS)
+    | LOG_SCROLL_KEYS
+    | {KeySym.PERIOD, KeySym.KP_PERIOD, KeySym.SPACE}
+)
+
+
+class KeyRepeat:
+    """Собственный автоповтор клавиш.
+
+    ОС присылает повторные KeyDown с разной задержкой и частотой. Здесь
+    первый повтор задаётся ``delay``, дальнейшие — ``interval``. Это же
+    состояние пригодится для будущего ticking-режима.
+    """
+
+    def __init__(
+        self,
+        delay: float = KEY_REPEAT_DELAY,
+        interval: float = KEY_REPEAT_INTERVAL,
+    ) -> None:
+        self.delay = delay
+        self.interval = interval
+        self._held: dict[KeySym, int] = {}
+        self._modes: dict[KeySym, str] = {}
+        self._seq = 0
+        self.active: KeySym | None = None
+        self.next_at: float | None = None
+
+    def press(self, sym: KeySym, now: float, mode: str) -> bool:
+        """Запомнить нажатие. False — это повтор самой ОС, его игнорируем."""
+        if sym in self._held:
+            return False
+        self._seq += 1
+        self._held[sym] = self._seq
+        self._modes[sym] = mode
+        self.active = sym
+        self.next_at = now + self.delay
+        return True
+
+    def release(self, sym: KeySym, now: float) -> None:
+        self._held.pop(sym, None)
+        self._modes.pop(sym, None)
+        if self.active != sym:
+            return
+        if self._held:
+            self.active = max(
+                self._held.items(),
+                key=lambda entry: entry[1],
+            )[0]
+            self.next_at = now + self.interval
+        else:
+            self.active = None
+            self.next_at = None
+
+    def mode_of(self, sym: KeySym) -> str | None:
+        return self._modes.get(sym)
+
+    def due(self, now: float) -> bool:
+        return self.next_at is not None and now >= self.next_at
+
+    def fire(self, now: float) -> None:
+        if self.next_at is None:
+            return
+        self.next_at += self.interval
+        if self.next_at < now:
+            # После лага не выдаём пачку повторов разом.
+            self.next_at = now + self.interval
+
+    def timeout(self, now: float) -> float | None:
+        if self.next_at is None:
+            return None
+        return max(0.0, self.next_at - now)
+
+    def suspend(self) -> None:
+        """Не повторять действие, пока режим его не разрешает."""
+        self.next_at = None
+
+    def resume(self, now: float) -> None:
+        """Снова включить автоповтор после смены режима."""
+        if self.active is not None and self.next_at is None:
+            self.next_at = now + self.interval
+
+
+def _repeatable_action(game: Game, sym: KeySym) -> bool:
+    """Разрешён ли автоповтор этой клавиши в текущем режиме."""
+    if sym not in REPEATABLE_KEYS:
+        return False
+    if game.mode == MODE_PLAYING:
+        return True
+    if game.mode == MODE_MAP:
+        return sym in MOVE_KEYS or sym in (
+            KeySym.PAGEUP,
+            KeySym.PAGEDOWN,
+        )
+    if game.mode in (MODE_MENU, MODE_SLOTS, MODE_PAUSE):
+        return sym in (
+            KeySym.UP,
+            KeySym.DOWN,
+            KeySym.W,
+            KeySym.S,
+            KeySym.K,
+            KeySym.J,
+        )
+    return False
+
+
+def _repeat_event(sym: KeySym) -> types.SimpleNamespace:
+    return types.SimpleNamespace(sym=sym, mod=0)
 
 
 def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
@@ -445,6 +571,7 @@ def main() -> None:
         game = Game(build_level=False)
         needs_fit = True
         settling = False
+        repeat = KeyRepeat()
 
         while True:
             # Подгоняем шрифт под окно, но не во время перетаскивания:
@@ -469,11 +596,22 @@ def main() -> None:
                 console, keep_aspect=True, integer_scaling=False
             )
 
-            events = list(
-                tcod.event.wait(
-                    RESIZE_SETTLE_SECONDS if settling else None
+            now = time.monotonic()
+            active = repeat.active
+            if active is not None and (
+                repeat.mode_of(active) != game.mode
+                or not _repeatable_action(game, active)
+            ):
+                repeat.suspend()
+            timeout = repeat.timeout(now)
+            if settling:
+                timeout = (
+                    RESIZE_SETTLE_SECONDS
+                    if timeout is None
+                    else min(timeout, RESIZE_SETTLE_SECONDS)
                 )
-            )
+            events = list(tcod.event.wait(timeout))
+            now = time.monotonic()
             resized = False
             for event in events:
                 if isinstance(event, tcod.event.WindowResized):
@@ -483,11 +621,30 @@ def main() -> None:
                 if isinstance(event, tcod.event.Quit):
                     raise SystemExit()
                 if isinstance(event, tcod.event.KeyDown):
+                    if event.sym in REPEATABLE_KEYS:
+                        # Повторы ОС игнорируем: у нас своя задержка.
+                        if not repeat.press(event.sym, now, game.mode):
+                            continue
                     if handle_key(game, event):
                         raise SystemExit()
+                elif isinstance(event, tcod.event.KeyUp):
+                    repeat.release(event.sym, now)
             if settling and not resized:
                 settling = False
                 needs_fit = True
+
+            active = repeat.active
+            if (
+                active is not None
+                and repeat.mode_of(active) == game.mode
+                and _repeatable_action(game, active)
+            ):
+                if repeat.next_at is None:
+                    repeat.resume(now)
+                if repeat.due(now):
+                    if handle_key(game, _repeat_event(active)):
+                        raise SystemExit()
+                    repeat.fire(now)
 
 
 if __name__ == "__main__":

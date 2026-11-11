@@ -65,6 +65,7 @@ from dungeon import Dungeon
 from entities import (
     BOSS_TYPES,
     ENEMY_BY_NAME,
+    ENEMY_GEAR_WEAR,
     Chest,
     Entity,
     Item,
@@ -908,7 +909,11 @@ class Game:
             )
             defender.hp -= dmg
             self.msg(f"You hit {defender.name} for {dmg}.")
-            self._wear_equipment(self.inventory.weapon)
+            wear = ENEMY_GEAR_WEAR.get(
+                defender.name,
+                (1, ARMOR_WEAR_PER_HIT),
+            )[0]
+            self._wear_equipment(self.inventory.weapon, wear)
             if not defender.alive():
                 self._kill_enemy(defender)
             return
@@ -921,7 +926,7 @@ class Game:
         )
         if defender is self.player:
             self.msg(f"{attacker.name} hits you for {dmg}.", "enemy")
-            self._hurt_player(dmg, attacker.name)
+            self._hurt_player(dmg, attacker.name, attacker=attacker)
         else:
             defender.hp -= dmg
             if not defender.alive():
@@ -959,15 +964,19 @@ class Game:
         dmg: int,
         source: str,
         wear_armor: bool = True,
+        attacker: Entity | None = None,
     ) -> None:
         if self.game_over:
             return
         self.player.hp -= dmg
         if wear_armor:
-            self._wear_equipment(
-                self.inventory.armor,
-                ARMOR_WEAR_PER_HIT,
-            )
+            amount = ARMOR_WEAR_PER_HIT
+            if attacker is not None:
+                amount = ENEMY_GEAR_WEAR.get(
+                    attacker.name,
+                    (1, ARMOR_WEAR_PER_HIT),
+                )[1]
+            self._wear_equipment(self.inventory.armor, amount)
         if self.player.hp <= 0:
             self.player.hp = 0
             self.killed_by = source
@@ -1329,7 +1338,7 @@ class Game:
             enemy.atk - self.total_df + random.randint(-1, 2),
         )
         self.msg(f"{enemy.name} shoots you for {dmg}.", "enemy")
-        self._hurt_player(dmg, enemy.name)
+        self._hurt_player(dmg, enemy.name, attacker=enemy)
 
     def _summon(self, enemy: Entity) -> None:
         limit = MAX_ENEMIES + len(self.dungeon.rooms) // 3
