@@ -52,7 +52,9 @@ from constants import (
     MODE_SLOTS,
     MODE_TRASH,
     POISON_DAMAGE,
+    POISON_PER_DEPTH,
     POISON_TURNS,
+    PLAYER_RANGED_RANGE,
     SUMMON_COOLDOWN,
     TRASH_CAPACITY,
     TRASH_CHAR,
@@ -69,6 +71,7 @@ from entities import (
     Chest,
     Entity,
     Item,
+    age_trash_gear,
     enemy_pool,
     make_boss,
     make_chest_loot,
@@ -168,6 +171,8 @@ class Game:
         self.gold = 0
         self.kills = 0
         self.turns = 0
+        # Счётчик атак игрока: main.py по нему останавливает автоповтор.
+        self.player_attack_events = 0
         self.killed_by = ""
         self.poison_turns = 0
         self.poison_damage = POISON_DAMAGE
@@ -344,6 +349,19 @@ class Game:
     def total_df(self) -> int:
         bonus = self.inventory.armor.value if self.inventory.armor else 0
         return self.player.df + bonus
+
+    @property
+    def melee_atk(self) -> int:
+        """Сила удара вплотную: лук в ближнем бою бонуса не даёт."""
+        weapon = self.inventory.weapon
+        if weapon is not None and weapon.effect == "ranged":
+            return self.player.atk
+        return self.total_atk
+
+    @property
+    def poison_strength(self) -> int:
+        """Яд глубже бьёт больнее, иначе 6 ходов по 1 почти незаметны."""
+        return POISON_DAMAGE + self.depth // POISON_PER_DEPTH
 
     def new_level(self, first: bool = False) -> None:
         if not first:
@@ -693,9 +711,9 @@ class Game:
             self.msg(f"A dart trap hits you for {dmg}.", "warn")
             self._hurt_player(dmg, "a chest trap", wear_armor=False)
             return
-        turns = 4 + self.depth // 2
+        turns = 4 + self.depth // 4
         self.poison_turns = max(self.poison_turns, turns)
-        self.poison_damage = max(self.poison_damage, POISON_DAMAGE)
+        self.poison_damage = max(self.poison_damage, self.poison_strength)
         self.msg(
             f"Poison gas escapes the chest! ({self.poison_turns} turns)",
             "warn",
@@ -731,13 +749,12 @@ class Game:
         for _ in range(count):
             if len(self.trash_items) >= TRASH_CAPACITY:
                 break
-            self.trash_items.append(
-                random_loot(
-                    self.trash_pos[0],
-                    self.trash_pos[1],
-                    self.depth,
-                )
+            item = random_loot(
+                self.trash_pos[0],
+                self.trash_pos[1],
+                self.depth,
             )
+            self.trash_items.append(age_trash_gear(item))
 
     def _spawn_boss(self) -> None:
         """На каждом пятом этаже поставить босса биома к лестнице."""
@@ -903,9 +920,10 @@ class Game:
 
     def attack(self, attacker: Entity, defender: Entity) -> None:
         if attacker is self.player:
+            self.player_attack_events += 1
             dmg = max(
                 1,
-                self.total_atk - defender.df + random.randint(-1, 2),
+                self.melee_atk - defender.df + random.randint(-1, 2),
             )
             defender.hp -= dmg
             self.msg(f"You hit {defender.name} for {dmg}.")
@@ -931,6 +949,65 @@ class Game:
             defender.hp -= dmg
             if not defender.alive():
                 self._kill_enemy(defender)
+
+    def fire_ranged(self) -> bool:
+        """Выстрелить из лука по ближайшему видимому врагу."""
+        if self.game_over:
+            return False
+        weapon = self.inventory.weapon
+        if weapon is None or weapon.effect != "ranged":
+            self.msg("Equip a bow to shoot at range.", "warn")
+            return False
+        target = self._ranged_target()
+        if target is None:
+            self.msg("No target within bow range.", "warn")
+            return False
+        dist = max(
+            abs(target.x - self.player.x),
+            abs(target.y - self.player.y),
+        )
+        dmg = max(
+            1,
+            self.total_atk
+            - target.df
+            - dist // 2
+            + random.randint(-1, 2),
+        )
+        target.hp -= dmg
+        self.msg(f"Your arrow hits {target.name} for {dmg}.")
+        wear = ENEMY_GEAR_WEAR.get(
+            target.name,
+            (1, ARMOR_WEAR_PER_HIT),
+        )[0]
+        self._wear_equipment(weapon, wear)
+        if not target.alive():
+            self._kill_enemy(target)
+        self.player_acted()
+        return True
+
+    def _ranged_target(self) -> Entity | None:
+        targets = [
+            enemy
+            for enemy in self.enemies
+            if enemy.alive()
+            and self.is_visible(enemy.x, enemy.y)
+            and max(
+                abs(enemy.x - self.player.x),
+                abs(enemy.y - self.player.y),
+            ) <= PLAYER_RANGED_RANGE
+        ]
+        if not targets:
+            return None
+        return min(
+            targets,
+            key=lambda enemy: (
+                max(
+                    abs(enemy.x - self.player.x),
+                    abs(enemy.y - self.player.y),
+                ),
+                enemy.hp,
+            ),
+        )
 
     def _kill_enemy(self, enemy: Entity) -> None:
         if enemy not in self.enemies:
@@ -988,7 +1065,7 @@ class Game:
             return
         was_poisoned = self.poison_turns > 0
         self.poison_turns = max(self.poison_turns, POISON_TURNS)
-        self.poison_damage = max(self.poison_damage, POISON_DAMAGE)
+        self.poison_damage = max(self.poison_damage, self.poison_strength)
         if was_poisoned:
             self.msg(
                 f"{enemy.name}'s venom burns again "

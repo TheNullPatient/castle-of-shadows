@@ -5,6 +5,9 @@ import random
 from dataclasses import dataclass, field
 
 from constants import (
+    CHEST_GEAR_INTACT,
+    CHEST_GEAR_MAX_FRAC,
+    CHEST_GEAR_MIN_FRAC,
     COLOR_ARMOR,
     COLOR_ENEMY,
     COLOR_ENEMY_BAT,
@@ -28,6 +31,13 @@ from constants import (
     COLOR_SCROLL,
     COLOR_SCROLL_LIGHTNING,
     COLOR_WEAPON,
+    POTION_HEAL_BASE,
+    POTION_HEAL_PER_DEPTH,
+    SCROLL_HEAL_BASE,
+    SCROLL_HEAL_PER_DEPTH,
+    TRASH_GEAR_INTACT,
+    TRASH_GEAR_MAX_FRAC,
+    TRASH_GEAR_MIN_FRAC,
 )
 
 
@@ -211,6 +221,19 @@ WEAPON_TABLE = [
     ),
 ]
 
+# Луки не дают бонуса в ближнем бою, зато стреляют по ближайшему видимому
+# врагу. Каждый выстрел тратит прочность, стрелы как отдельный ресурс не нужны.
+BOW_TABLE = [
+    Item(
+        "Shortbow", "}", "weapon", COLOR_WEAPON, value=3, slot="weapon",
+        max_durability=45, effect="ranged",
+    ),
+    Item(
+        "Longbow", "}", "weapon", COLOR_WEAPON, value=5, slot="weapon",
+        max_durability=65, effect="ranged",
+    ),
+]
+
 ARMOR_TABLE = [
     Item(
         "Leather Armor", "[", "armor", COLOR_ARMOR, value=1, slot="armor",
@@ -330,6 +353,12 @@ def _weapon_pool(depth: int) -> list[Item]:
     return WEAPON_TABLE[4:]
 
 
+def _bow_pool(depth: int) -> list[Item]:
+    if depth < 8:
+        return BOW_TABLE[:1]
+    return BOW_TABLE
+
+
 def _armor_pool(depth: int) -> list[Item]:
     if depth < 5:
         return ARMOR_TABLE[:2]
@@ -340,17 +369,65 @@ def _armor_pool(depth: int) -> list[Item]:
     return ARMOR_TABLE[3:]
 
 
+def _scale_consumable(item: Item, depth: int) -> Item:
+    """Поднять лечение зелий и свитков под текущую глубину."""
+    if item.effect == "health" and item.kind == "potion":
+        item.value = POTION_HEAL_BASE + depth * POTION_HEAL_PER_DEPTH
+    elif item.effect == "healing" and item.kind == "scroll":
+        item.value = SCROLL_HEAL_BASE + depth * SCROLL_HEAL_PER_DEPTH
+    return item
+
+
+def _age_gear(
+    item: Item,
+    intact_chance: float,
+    min_frac: float,
+    max_frac: float,
+) -> Item:
+    """Случайно износить снаряжение в контейнере."""
+    if item.kind not in ("weapon", "armor") or item.max_durability <= 0:
+        return item
+    if random.random() < intact_chance:
+        item.durability = item.max_durability
+    else:
+        frac = random.uniform(min_frac, max_frac)
+        item.durability = max(1, int(item.max_durability * frac))
+    return item
+
+
+def age_chest_gear(item: Item) -> Item:
+    return _age_gear(
+        item,
+        CHEST_GEAR_INTACT,
+        CHEST_GEAR_MIN_FRAC,
+        CHEST_GEAR_MAX_FRAC,
+    )
+
+
+def age_trash_gear(item: Item) -> Item:
+    return _age_gear(
+        item,
+        TRASH_GEAR_INTACT,
+        TRASH_GEAR_MIN_FRAC,
+        TRASH_GEAR_MAX_FRAC,
+    )
+
+
 def random_loot(x: int, y: int, depth: int) -> Item:
     roll = random.random()
     if roll < 0.28:
         return Item("Gold", "$", "gold", COLOR_GOLD, x, y, random.randint(3, 8 + depth))
     if roll < 0.55:
-        return random.choice(POTION_TABLE).copy_at(x, y)
-    if roll < 0.72:
+        item = random.choice(POTION_TABLE).copy_at(x, y)
+        return _scale_consumable(item, depth)
+    if roll < 0.70:
+        if depth >= 2 and random.random() < 0.28:
+            return random.choice(_bow_pool(depth)).copy_at(x, y)
         return random.choice(_weapon_pool(depth)).copy_at(x, y)
     if roll < 0.86:
         return random.choice(_armor_pool(depth)).copy_at(x, y)
-    return random.choice(SCROLL_TABLE).copy_at(x, y)
+    item = random.choice(SCROLL_TABLE).copy_at(x, y)
+    return _scale_consumable(item, depth)
 
 
 def make_chest_loot(depth: int, guarded: bool = False) -> list[Item]:
@@ -366,13 +443,29 @@ def make_chest_loot(depth: int, guarded: bool = False) -> list[Item]:
     for _ in range(count):
         roll = random.random()
         if roll < 0.36:
-            items.append(random.choice(POTION_TABLE).copy())
+            items.append(
+                _scale_consumable(
+                    random.choice(POTION_TABLE).copy(),
+                    depth,
+                )
+            )
         elif roll < 0.65:
-            items.append(random.choice(SCROLL_TABLE).copy())
+            items.append(
+                _scale_consumable(
+                    random.choice(SCROLL_TABLE).copy(),
+                    depth,
+                )
+            )
         elif random.random() < 0.5:
-            items.append(random.choice(_weapon_pool(depth)).copy())
+            if depth >= 2 and random.random() < 0.28:
+                gear = random.choice(_bow_pool(depth)).copy()
+            else:
+                gear = random.choice(_weapon_pool(depth)).copy()
+            items.append(age_chest_gear(gear))
         else:
-            items.append(random.choice(_armor_pool(depth)).copy())
+            items.append(
+                age_chest_gear(random.choice(_armor_pool(depth)).copy())
+            )
 
     return [
         Item("Gold", "$", "gold", COLOR_GOLD, value=gold),

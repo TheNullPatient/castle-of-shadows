@@ -209,6 +209,7 @@ class KeyRepeat:
         self.interval = interval
         self._held: dict[KeySym, int] = {}
         self._modes: dict[KeySym, str] = {}
+        self._blocked: set[KeySym] = set()
         self._seq = 0
         self.active: KeySym | None = None
         self.next_at: float | None = None
@@ -220,6 +221,7 @@ class KeyRepeat:
         self._seq += 1
         self._held[sym] = self._seq
         self._modes[sym] = mode
+        self._blocked.discard(sym)
         self.active = sym
         self.next_at = now + self.delay
         return True
@@ -227,13 +229,19 @@ class KeyRepeat:
     def release(self, sym: KeySym, now: float) -> None:
         self._held.pop(sym, None)
         self._modes.pop(sym, None)
+        self._blocked.discard(sym)
         if self.active != sym:
             return
-        if self._held:
+        ready = [
+            held
+            for held in self._held
+            if held not in self._blocked
+        ]
+        if ready:
             self.active = max(
-                self._held.items(),
-                key=lambda entry: entry[1],
-            )[0]
+                ready,
+                key=lambda held: self._held[held],
+            )
             self.next_at = now + self.interval
         else:
             self.active = None
@@ -241,6 +249,19 @@ class KeyRepeat:
 
     def mode_of(self, sym: KeySym) -> str | None:
         return self._modes.get(sym)
+
+    def interrupt(self, sym: KeySym | None = None) -> None:
+        """Остановить повтор до отпускания клавиши (например, после атаки)."""
+        if sym is None:
+            sym = self.active
+        if sym is None:
+            return
+        self._blocked.add(sym)
+        if self.active == sym:
+            self.next_at = None
+
+    def is_blocked(self, sym: KeySym | None) -> bool:
+        return sym is not None and sym in self._blocked
 
     def due(self, now: float) -> bool:
         return self.next_at is not None and now >= self.next_at
@@ -264,8 +285,29 @@ class KeyRepeat:
 
     def resume(self, now: float) -> None:
         """Снова включить автоповтор после смены режима."""
-        if self.active is not None and self.next_at is None:
+        if (
+            self.active is not None
+            and self.next_at is None
+            and self.active not in self._blocked
+        ):
             self.next_at = now + self.interval
+
+
+def _dispatch_key(
+    game: Game,
+    event: tcod.event.KeyDown,
+    repeat: KeyRepeat,
+) -> bool:
+    """Обработать клавишу и прервать автоповтор после атаки игрока."""
+    attacks_before = game.player_attack_events
+    result = handle_key(game, event)
+    if (
+        game.player_attack_events != attacks_before
+        and repeat.active is not None
+        and not repeat.is_blocked(repeat.active)
+    ):
+        repeat.interrupt(repeat.active)
+    return result
 
 
 def _repeatable_action(game: Game, sym: KeySym) -> bool:
@@ -339,6 +381,9 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return False
     if sym == KeySym.I:
         game.interact()
+        return False
+    if sym == KeySym.F:
+        game.fire_ranged()
         return False
     if sym in MOVE_KEYS:
         dx, dy = MOVE_KEYS[sym]
@@ -621,11 +666,11 @@ def main() -> None:
                 if isinstance(event, tcod.event.Quit):
                     raise SystemExit()
                 if isinstance(event, tcod.event.KeyDown):
-                    if event.sym in REPEATABLE_KEYS:
-                        # Повторы ОС игнорируем: у нас своя задержка.
-                        if not repeat.press(event.sym, now, game.mode):
-                            continue
-                    if handle_key(game, event):
+                    # Повторы ОС игнорируем: у нас своя задержка. Это
+                    # касается и неавтоповторяемых клавиш вроде f или i.
+                    if not repeat.press(event.sym, now, game.mode):
+                        continue
+                    if _dispatch_key(game, event, repeat):
                         raise SystemExit()
                 elif isinstance(event, tcod.event.KeyUp):
                     repeat.release(event.sym, now)
@@ -637,12 +682,13 @@ def main() -> None:
             if (
                 active is not None
                 and repeat.mode_of(active) == game.mode
+                and not repeat.is_blocked(active)
                 and _repeatable_action(game, active)
             ):
                 if repeat.next_at is None:
                     repeat.resume(now)
                 if repeat.due(now):
-                    if handle_key(game, _repeat_event(active)):
+                    if _dispatch_key(game, _repeat_event(active), repeat):
                         raise SystemExit()
                     repeat.fire(now)
 

@@ -95,7 +95,8 @@ class Inventory:
     def item_label(item: Item) -> str:
         extra = ""
         if item.kind == "weapon":
-            extra = f" (+{item.value})"
+            ranged = ", ranged" if item.effect == "ranged" else ""
+            extra = f" (+{item.value}{ranged})"
         elif item.kind == "armor":
             extra = f" (+{item.value})"
         elif item.kind == "potion":
@@ -189,7 +190,17 @@ class Inventory:
             return True
         if slot == "weapon":
             self.weapon = item
-            game.msg(f"You wield the {item.name} (+{item.value} ATK).", "item")
+            if item.effect == "ranged":
+                game.msg(
+                    f"You wield the {item.name} (+{item.value} ranged ATK). "
+                    f"Press f to shoot.",
+                    "item",
+                )
+            else:
+                game.msg(
+                    f"You wield the {item.name} (+{item.value} ATK).",
+                    "item",
+                )
         else:
             self.armor = item
             game.msg(f"You put on the {item.name} (+{item.value} DEF).", "item")

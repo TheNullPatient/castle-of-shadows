@@ -77,10 +77,29 @@ BOSS_HEAL_MIN = 8
 # Износ экипировки: оружие — за удар, броня — за каждое попадание.
 ARMOR_WEAR_PER_HIT = 2
 
+# Дальний бой: лук бьёт по ближайшему видимому врагу в этом радиусе.
+PLAYER_RANGED_RANGE = 6
+
+# Прочность снаряжения в контейнерах. В сундуках вещи чаще целые, в мусорке
+# чаще уже потрёпанные; доля считается от максимальной прочности.
+CHEST_GEAR_INTACT = 0.55
+CHEST_GEAR_MIN_FRAC = 0.55
+CHEST_GEAR_MAX_FRAC = 0.90
+TRASH_GEAR_INTACT = 0.12
+TRASH_GEAR_MIN_FRAC = 0.20
+TRASH_GEAR_MAX_FRAC = 0.70
+
+# Лечение растёт с глубиной, иначе к 20-му этажу зелья почти бесполезны.
+POTION_HEAL_BASE = 12
+POTION_HEAL_PER_DEPTH = 2
+SCROLL_HEAL_BASE = 18
+SCROLL_HEAL_PER_DEPTH = 1
+
 # Поведение врагов.
 ENEMY_RANGED_RANGE = 6
 POISON_TURNS = 6
 POISON_DAMAGE = 1
+POISON_PER_DEPTH = 6  # +1 урон яда за каждые 6 этажей
 SUMMON_COOLDOWN = 5
 MAX_ENEMIES = 14
 
