@@ -61,6 +61,7 @@ from constants import (
     MODE_MAP,
     MODE_MENU,
     MODE_PAUSE,
+    MODE_RUN_MODES,
     MODE_SHOP,
     MODE_SLOTS,
     SCREEN_H,
@@ -72,6 +73,11 @@ from constants import (
     TRASH_CHAR,
     VIEW_H,
     VIEW_W,
+    RUN_MODE_AVAILABLE,
+    RUN_MODE_DESCRIPTIONS,
+    RUN_MODE_NAMES,
+    RUN_MODE_ORDER,
+    RUN_MODE_SHORT,
 )
 from game import MSG_COLORS, Game
 
@@ -139,6 +145,9 @@ def render(console: tcod.console.Console, game: Game) -> None:
         return
     if game.mode == MODE_SLOTS:
         _render_slots(console, game)
+        return
+    if game.mode == MODE_RUN_MODES:
+        _render_run_modes(console, game)
         return
     if game.mode == "help":
         _render_help(console)
@@ -895,16 +904,80 @@ def _slot_label(info: dict | None) -> str:
         when = datetime.fromtimestamp(info["saved_at"]).strftime("%d.%m %H:%M")
     except (OverflowError, OSError, ValueError):
         when = "--"
+    mode = RUN_MODE_SHORT.get(info.get("run_mode", ""), "General")
     return (
-        f"depth {info['depth']:>2}  LV {info['player_level']}  "
-        f"{info['turns']} turns  {info['gold']} gold  {when}"
+        f"{mode:<11} D{info['depth']:>2}  LV {info['player_level']}  "
+        f"{info['turns']}t  {info['gold']}g  {when}"
+    )
+
+
+def _render_run_modes(console: tcod.console.Console, game: Game) -> None:
+    """Экран выбора режима забега перед выбором слота."""
+    console.clear(fg=COLOR_UI, bg=COLOR_BG)
+    width = min(SCREEN_W - 4, 66)
+    height = len(RUN_MODE_ORDER) * 2 + 7
+    x0 = max(1, (SCREEN_W - width) // 2)
+    y0 = max(1, (SCREEN_H - height) // 2)
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=" NEW RUN ",
+        fg=COLOR_GOLD,
+        bg=COLOR_BG,
+        clear=True,
+    )
+    console.print(
+        x0 + 2,
+        y0 + 1,
+        "Choose a run mode"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
+    )
+    start_y = y0 + 3
+    for i, run_mode in enumerate(RUN_MODE_ORDER):
+        selected = i == game.run_mode_index
+        available = RUN_MODE_AVAILABLE.get(run_mode, False)
+        name = RUN_MODE_NAMES.get(run_mode, run_mode)
+        marker = ">" if selected else " "
+        status = "" if available else "soon"
+        text = (
+            f"{marker} {name:<18} {status:<4} "
+            f"{RUN_MODE_DESCRIPTIONS.get(run_mode, '')}"
+        )
+        if selected:
+            fg = COLOR_GOLD
+        elif available:
+            fg = COLOR_UI
+        else:
+            fg = COLOR_DIM
+        console.print(
+            x0 + 2, start_y + i * 2, text[: width - 4], fg=fg, bg=COLOR_BG
+        )
+    note_y = y0 + height - 3
+    note = game.run_mode_note
+    console.print(
+        x0 + 2,
+        note_y,
+        (note or "General is the current full game.")[: width - 4],
+        fg=COLOR_WARN if note else COLOR_DIM,
+        bg=COLOR_BG,
+    )
+    hint = "W/S or arrows · Enter choose · Esc back"
+    console.print(
+        x0 + 2,
+        y0 + height - 2,
+        hint[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
     )
 
 
 def _render_slots(console: tcod.console.Console, game: Game) -> None:
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
     infos = game.slot_infos()
-    width = min(SCREEN_W - 4, 64)
+    width = min(SCREEN_W - 4, 68)
     height = min(SCREEN_H - 2, len(infos) + 8)
     x0 = max(1, (SCREEN_W - width) // 2)
     y0 = max(1, (SCREEN_H - height) // 2)
@@ -919,11 +992,11 @@ def _render_slots(console: tcod.console.Console, game: Game) -> None:
         bg=COLOR_BG,
         clear=True,
     )
-    subtitle = (
-        "Choose a run to continue"
-        if game.slot_action == "continue"
-        else "Choose a slot for the new run"
-    )
+    if game.slot_action == "continue":
+        subtitle = "Choose a run to continue"
+    else:
+        run_mode = RUN_MODE_NAMES.get(game.new_run_mode, "General")
+        subtitle = f"Mode: {run_mode} · choose a slot for the new run"
     console.print(
         x0 + 2, y0 + 1, subtitle[: width - 4], fg=COLOR_DIM, bg=COLOR_BG
     )
@@ -977,7 +1050,8 @@ def _render_pause(console: tcod.console.Console, game: Game) -> None:
     console.print(
         x0 + 2,
         y0 + 1,
-        f"Depth {game.depth} · {BIOME_NAMES[biome_index(game.depth)]}"
+        f"{game.run_mode_summary()} · Depth {game.depth}"
+        f" · {BIOME_NAMES[biome_index(game.depth)]}"
         f"   {slot}"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,

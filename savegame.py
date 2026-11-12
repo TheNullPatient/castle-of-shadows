@@ -16,6 +16,8 @@ from constants import (
     MAP_W,
     MODE_PLAYING,
     ROOT,
+    RUN_MODE_GENERAL,
+    RUN_MODE_NAMES,
 )
 from dungeon import Dungeon
 from entities import Chest, Entity, Item, Trap
@@ -102,12 +104,20 @@ def slot_info(slot: int) -> dict[str, Any] | None:
     stats = state.get("stats", {})
     return {
         "slot": slot,
+        "run_mode": _run_mode(state.get("run_mode")),
         "depth": int(state.get("depth", 1)),
         "turns": int(stats.get("turns", 0)),
         "player_level": int(stats.get("player_level", 1)),
         "gold": int(stats.get("gold", 0)),
         "saved_at": float(state.get("saved_at", 0.0)),
     }
+
+
+def _run_mode(value: Any) -> str:
+    """Нормализовать режим забега; старые сейвы считаются general."""
+    if isinstance(value, str) and value in RUN_MODE_NAMES:
+        return value
+    return RUN_MODE_GENERAL
 
 
 def list_slots() -> list[dict[str, Any] | None]:
@@ -308,6 +318,7 @@ def build_state(game: Any) -> dict[str, Any]:
     inventory = game.inventory
     w, h = game.dungeon.w, game.dungeon.h
     return {
+        "run_mode": getattr(game, "run_mode", RUN_MODE_GENERAL),
         "depth": game.depth,
         "player": entity_to_dict(game.player),
         "inventory": {
@@ -408,6 +419,8 @@ def _restore_dungeon(data: dict[str, Any]) -> tuple[Dungeon, int, int]:
 
 def apply_state(game: Any, data: dict[str, Any]) -> None:
     """Восстановить объект Game из состояния, не генерируя новый этаж."""
+    game.run_mode = _run_mode(data.get("run_mode"))
+    game.new_run_mode = game.run_mode
     game.depth = int(data["depth"])
     game.player = entity_from_dict(data["player"])
     _restore_inventory(game, data.get("inventory", {}))

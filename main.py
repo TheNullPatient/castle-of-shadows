@@ -23,6 +23,7 @@ from constants import (
     MODE_MENU,
     MODE_PAUSE,
     MODE_PLAYING,
+    MODE_RUN_MODES,
     MODE_SHOP,
     MODE_SLOTS,
     SCREEN_H,
@@ -336,7 +337,7 @@ def _repeatable_action(game: Game, sym: KeySym) -> bool:
             KeySym.PAGEUP,
             KeySym.PAGEDOWN,
         )
-    if game.mode in (MODE_MENU, MODE_SLOTS, MODE_PAUSE):
+    if game.mode in (MODE_MENU, MODE_SLOTS, MODE_PAUSE, MODE_RUN_MODES):
         return sym in (
             KeySym.UP,
             KeySym.DOWN,
@@ -370,6 +371,8 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return _handle_menu(game, event)
     if game.mode == MODE_SLOTS:
         return _handle_slots(game, event)
+    if game.mode == MODE_RUN_MODES:
+        return _handle_run_modes(game, event)
     if game.mode == MODE_MAP:
         return _handle_map(game, event)
     if game.mode == MODE_PAUSE:
@@ -505,7 +508,7 @@ def _handle_menu(game: Game, event: tcod.event.KeyDown) -> bool:
             if not game.open_slots("continue"):
                 game.menu_index = 0
         elif choice == "New Game":
-            game.open_slots("new")
+            game.open_run_modes()
         elif choice == "How to Play":
             game.toggle_help()
         else:
@@ -513,6 +516,23 @@ def _handle_menu(game: Game, event: tcod.event.KeyDown) -> bool:
         return False
     if sym in (KeySym.Q, KeySym.ESCAPE):
         return True
+    return False
+
+
+def _handle_run_modes(game: Game, event: tcod.event.KeyDown) -> bool:
+    sym = event.sym
+    if sym in (KeySym.ESCAPE, KeySym.Q):
+        game.close_run_modes()
+        return False
+    if sym in (KeySym.UP, KeySym.W, KeySym.K):
+        game.run_mode_move(-1)
+        return False
+    if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+        game.run_mode_move(1)
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        game.run_mode_activate()
+        return False
     return False
 
 

@@ -53,6 +53,7 @@ from constants import (
     MODE_MENU,
     MODE_PAUSE,
     MODE_PLAYING,
+    MODE_RUN_MODES,
     MODE_SHOP,
     MODE_SLOTS,
     MODE_TRASH,
@@ -61,6 +62,11 @@ from constants import (
     POISON_TURNS,
     PLAYER_RANGED_RANGE,
     REPAIR_COST_DIVISOR,
+    RUN_MODE_AVAILABLE,
+    RUN_MODE_GENERAL,
+    RUN_MODE_NAMES,
+    RUN_MODE_ORDER,
+    RUN_MODE_SHORT,
     SEARCH_RADIUS,
     SECRET_DOOR_CHAR,
     SECRET_ROOM_CHANCE,
@@ -187,6 +193,10 @@ class Game:
     def __init__(self, build_level: bool = True) -> None:
         self.mode = MODE_MENU
         self.menu_index = 0
+        self.run_mode = RUN_MODE_GENERAL
+        self.new_run_mode = RUN_MODE_GENERAL
+        self.run_mode_index = 0
+        self.run_mode_note = ""
         self.help_return_mode = MODE_MENU
         self.slot: int | None = None
         self.pause_index = 0
@@ -256,6 +266,45 @@ class Game:
         if has_any_save():
             return ("Continue", "New Game", "How to Play", "Quit")
         return self.MENU_OPTIONS
+
+    def open_run_modes(self) -> None:
+        """Экран выбора режима перед выбором слота для новой игры."""
+        try:
+            self.run_mode_index = RUN_MODE_ORDER.index(self.new_run_mode)
+        except ValueError:
+            self.run_mode_index = 0
+        self.run_mode_note = ""
+        self.mode = MODE_RUN_MODES
+
+    def close_run_modes(self) -> None:
+        if self.mode == MODE_RUN_MODES:
+            self.mode = MODE_MENU
+            self.menu_index = 0
+
+    def run_mode_move(self, delta: int) -> None:
+        self.run_mode_index = (
+            self.run_mode_index + delta
+        ) % len(RUN_MODE_ORDER)
+        self.run_mode_note = ""
+
+    def selected_run_mode(self) -> str:
+        return RUN_MODE_ORDER[self.run_mode_index]
+
+    def run_mode_activate(self) -> bool:
+        """Выбрать режим и перейти к слотам; закрытые режимы не начинают игру."""
+        run_mode = self.selected_run_mode()
+        if not RUN_MODE_AVAILABLE.get(run_mode, False):
+            name = RUN_MODE_NAMES.get(run_mode, run_mode)
+            self.run_mode_note = f"{name} is not available yet."
+            return False
+        self.new_run_mode = run_mode
+        self.run_mode_note = ""
+        self.open_slots("new")
+        return True
+
+    def run_mode_summary(self) -> str:
+        """Название режима текущего забега для слотов и паузы."""
+        return RUN_MODE_SHORT.get(self.run_mode, "General")
 
     def slot_infos(self) -> list[dict | None]:
         return list_slots()
@@ -340,8 +389,11 @@ class Game:
     def start_new_game(self, slot: int) -> None:
         """Начать новый забег в выбранном слоте."""
         delete_save(slot)
+        run_mode = self.new_run_mode
         self.__init__()
         self.slot = slot
+        self.run_mode = run_mode
+        self.new_run_mode = run_mode
         self.mode = MODE_PLAYING
         self.save()
 
@@ -2274,7 +2326,10 @@ class Game:
     def restart(self) -> None:
         """Начать новый забег в том же слоте после смерти."""
         slot = self.slot if self.slot is not None else first_free_slot()
+        run_mode = self.run_mode
         self.__init__()
         self.slot = slot
+        self.run_mode = run_mode
+        self.new_run_mode = run_mode
         self.mode = MODE_PLAYING
         self.save()

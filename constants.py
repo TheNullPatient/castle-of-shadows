@@ -229,6 +229,50 @@ MODE_TRASH = "trash"
 MODE_CHEST = "chest"
 MODE_SHOP = "shop"
 MODE_AIM = "aim"
+MODE_RUN_MODES = "run_modes"
 MODE_HELP = "help"
 MODE_DEAD = "dead"
 MODE_MAP = "map"
+
+# Режимы забега. Сейчас доступен только general — текущая полная игра;
+# остальные зарезервированы дорожной картой и постепенно открываются.
+RUN_MODE_CLASSIC = "classic"
+RUN_MODE_GENERAL = "general"
+RUN_MODE_TICKING = "ticking"
+RUN_MODE_ENDURANCE_CLASSIC = "endurance-classic"
+RUN_MODE_ENDURANCE = "endurance"
+RUN_MODE_ENDURANCE_TICKING = "endurance-ticking"
+
+RUN_MODE_ORDER = (
+    RUN_MODE_GENERAL,
+    RUN_MODE_CLASSIC,
+    RUN_MODE_TICKING,
+    RUN_MODE_ENDURANCE_CLASSIC,
+    RUN_MODE_ENDURANCE,
+    RUN_MODE_ENDURANCE_TICKING,
+)
+RUN_MODE_NAMES = {
+    RUN_MODE_GENERAL: "General",
+    RUN_MODE_CLASSIC: "Classic",
+    RUN_MODE_TICKING: "Ticking",
+    RUN_MODE_ENDURANCE_CLASSIC: "Endurance Classic",
+    RUN_MODE_ENDURANCE: "Endurance",
+    RUN_MODE_ENDURANCE_TICKING: "Endurance Ticking",
+}
+RUN_MODE_SHORT = {
+    RUN_MODE_GENERAL: "General",
+    RUN_MODE_CLASSIC: "Classic",
+    RUN_MODE_TICKING: "Ticking",
+    RUN_MODE_ENDURANCE_CLASSIC: "End-Classic",
+    RUN_MODE_ENDURANCE: "Endurance",
+    RUN_MODE_ENDURANCE_TICKING: "End-Ticking",
+}
+RUN_MODE_DESCRIPTIONS = {
+    RUN_MODE_GENERAL: "Big floors, shops, traps, secrets",
+    RUN_MODE_CLASSIC: "Compact 25-floor descent",
+    RUN_MODE_TICKING: "Timed turns and cooldowns",
+    RUN_MODE_ENDURANCE_CLASSIC: "Endless classic survival",
+    RUN_MODE_ENDURANCE: "Endless full world",
+    RUN_MODE_ENDURANCE_TICKING: "Endless real-time hardcore",
+}
+RUN_MODE_AVAILABLE = {RUN_MODE_GENERAL: True}
