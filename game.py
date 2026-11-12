@@ -240,6 +240,8 @@ class Game:
         self.active_chest: Chest | None = None
         self.chest_deposit_mode = False
         self.chest_hinted = False
+        self.inventory_index = 0
+        self.container_index = 0
         self.merchant_pos: tuple[int, int] | None = None
         self.merchant_stock: list[Item] = []
         self.merchant_noticed = False
@@ -516,6 +518,8 @@ class Game:
         self.active_chest = None
         self.chest_deposit_mode = False
         self.chest_hinted = False
+        self.inventory_index = 0
+        self.container_index = 0
         self.merchant_pos = None
         self.merchant_stock = []
         self.merchant_noticed = False
@@ -1081,6 +1085,8 @@ class Game:
         """Открыть сундук и показать содержимое в отдельном меню."""
         self.active_chest = chest
         self.chest_deposit_mode = False
+        self.inventory_index = 0
+        self.container_index = 0
         if not chest.opened:
             chest.opened = True
             self.msg("You open the chest.", "item")
@@ -1105,6 +1111,7 @@ class Game:
             self.mode = MODE_PLAYING
         self.active_chest = None
         self.chest_deposit_mode = False
+        self.container_index = 0
 
     def take_from_chest(self, index: int) -> bool:
         chest = self.active_chest
@@ -1126,6 +1133,7 @@ class Game:
             self.msg(f"You take {item.name} from the chest.", "item")
         if not chest.items:
             self.msg("The chest is now empty.", "item")
+        self.clamp_selection()
         return True
 
     def put_in_chest(self, index: int) -> bool:
@@ -1150,6 +1158,7 @@ class Game:
             f"({len(chest.items)}/{CHEST_CAPACITY})",
             "item",
         )
+        self.clamp_selection()
         return True
 
     def chest_nearby(self) -> Chest | None:
@@ -2041,6 +2050,7 @@ class Game:
     def use_inventory(self, index: int) -> bool:
         self.skip_turn = False
         if self.inventory.use(index, self):
+            self.clamp_selection()
             if not self.skip_turn:
                 self.player_acted()
             return True
@@ -2091,6 +2101,7 @@ class Game:
             f"({len(self.trash_items)}/{TRASH_CAPACITY})",
             "item",
         )
+        self.clamp_selection()
         return True
 
     def open_trash(self) -> None:
@@ -2098,12 +2109,15 @@ class Game:
             self.msg("There is no trash bin nearby.", "warn")
             return
         self.trash_deposit_mode = False
+        self.inventory_index = 0
+        self.container_index = 0
         self.mode = MODE_TRASH
 
     def close_trash(self) -> None:
         if self.mode == MODE_TRASH:
             self.mode = MODE_PLAYING
         self.trash_deposit_mode = False
+        self.container_index = 0
 
     def take_from_trash(self, index: int) -> bool:
         if not (0 <= index < len(self.trash_items)):
@@ -2113,12 +2127,14 @@ class Game:
             self.gold += item.value
             self.trash_items.pop(index)
             self.msg(f"You find {item.value} gold in the trash.", "gold")
+            self.clamp_selection()
             return True
         if not self.inventory.add(item):
             self.msg("Your pack is full.", "warn")
             return False
         self.trash_items.pop(index)
         self.msg(f"You take {item.name} from the trash.", "item")
+        self.clamp_selection()
         return True
 
     def teleport_player(self) -> bool:
@@ -2390,7 +2406,61 @@ class Game:
         if self.mode == MODE_INVENTORY:
             self.mode = MODE_PLAYING
         elif self.mode == MODE_PLAYING:
+            self.inventory_index = 0
             self.mode = MODE_INVENTORY
+
+    def inventory_move(self, delta: int) -> None:
+        """Передвинуть курсор по рюкзаку с закольцовыванием."""
+        count = len(self.inventory.items)
+        if count <= 0:
+            self.inventory_index = 0
+            return
+        self.inventory_index = (self.inventory_index + delta) % count
+
+    def inventory_selected(self) -> int | None:
+        """Индекс выбранного предмета рюкзака или None для пустого рюкзака."""
+        count = len(self.inventory.items)
+        if count <= 0:
+            self.inventory_index = 0
+            return None
+        self.inventory_index = min(max(0, self.inventory_index), count - 1)
+        return self.inventory_index
+
+    def container_count(self) -> int:
+        """Сколько предметов в открытом контейнере (не в режиме переноса)."""
+        if self.mode == MODE_CHEST and not self.chest_deposit_mode:
+            return len(self.active_chest.items) if self.active_chest else 0
+        if self.mode == MODE_TRASH and not self.trash_deposit_mode:
+            return len(self.trash_items)
+        return 0
+
+    def container_move(self, delta: int) -> None:
+        """Передвинуть курсор по содержимому сундука или мусорки."""
+        count = self.container_count()
+        if count <= 0:
+            self.container_index = 0
+            return
+        self.container_index = (self.container_index + delta) % count
+
+    def container_selected(self) -> int | None:
+        """Индекс выбранного предмета контейнера или None."""
+        count = self.container_count()
+        if count <= 0:
+            self.container_index = 0
+            return None
+        self.container_index = min(max(0, self.container_index), count - 1)
+        return self.container_index
+
+    def clamp_selection(self) -> None:
+        """Держать курсоры в пределах списков после переноса предметов."""
+        count = len(self.inventory.items)
+        self.inventory_index = (
+            min(max(0, self.inventory_index), count - 1) if count else 0
+        )
+        count = self.container_count()
+        self.container_index = (
+            min(max(0, self.container_index), count - 1) if count else 0
+        )
 
     def restart(self) -> None:
         """Начать новый забег в том же слоте после смерти."""

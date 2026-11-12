@@ -89,11 +89,11 @@ HELP_ROWS = [
     ("Search", "x: find traps / secret doors nearby"),
     ("Wait", ". or Space"),
     ("Pick up", "walk over an item (gold auto)"),
-    ("Inventory", "Tab, then a-z to use / equip"),
+    ("Inventory", "Tab: W/S + Enter, or a-z"),
     ("Interact", "i: chest / trash / merchant / altar nearby"),
-    ("Throw away", "trash menu: Del, a-z (one at a time)"),
+    ("Throw away", "trash: Del, W/S + Enter (one at a time)"),
     ("Trash", "stand next to '%' and press i"),
-    ("Chests", "i near '=' in vaults: a-z take, Del put"),
+    ("Chests", "i near '=': W/S + Enter take, Del put"),
     ("Altar", "i near '_': heal, cure, or +1 max HP"),
     ("Shop", "i near '&': buy, R repair, Del sell"),
     ("Descend", "stand on '>' and press > or Enter"),
@@ -631,6 +631,7 @@ def _render_inventory(
         # названия вроде "Potion of Iron Skin (+1 DEF)" не обрезались.
         column_width = (width - 4) // 2 if columns == 2 else width - 4
         stride = column_width + 1 if columns == 2 else width - 4
+        selected = game.inventory_index
         for i, item in enumerate(inventory.items):
             column = i // rows_per_column
             row = i % rows_per_column
@@ -640,17 +641,21 @@ def _render_inventory(
             equipped = item is inventory.weapon or item is inventory.armor
             marker = "*" if equipped else " "
             line = f"{letter}){marker}{inventory.label(item)}"
-            fg = COLOR_GOLD if equipped else item.color
+            chosen = i == selected
+            fg = COLOR_GOLD if chosen or equipped else item.color
+            bg = COLOR_PANEL_LIGHT if chosen else COLOR_PANEL
+            if chosen:
+                line = line[:column_width].ljust(column_width)
             console.print(
                 x0 + 2 + column * stride,
                 y0 + 5 + row,
                 line,
                 fg=fg,
-                bg=COLOR_PANEL,
+                bg=bg,
             )
 
     hint_text = (
-        hint if hint is not None else "a-z use/equip   Tab/Esc close"
+        hint if hint is not None else "W/S move · Enter use · a-z · Esc close"
     )
     console.print(
         x0 + 2,
@@ -684,7 +689,7 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
             game,
             title=" Put into trash "
             f"(pack {len(game.inventory.items)}/{game.inventory.capacity}) ",
-            hint="a-z put one   ESC done",
+            hint="W/S move · Enter put one · Esc done",
         )
         return
     lines = _container_lines(
@@ -710,18 +715,21 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
             x0 + 2, y0 + 2, "(empty)", fg=COLOR_DIM, bg=COLOR_PANEL
         )
     else:
+        selected = min(game.container_index, len(lines) - 1)
         for i, (line, fg) in enumerate(lines):
+            chosen = i == selected
+            text = line[: width - 4]
             console.print(
                 x0 + 2,
                 y0 + 2 + i,
-                line[: width - 4],
-                fg=fg,
-                bg=COLOR_PANEL,
+                text.ljust(width - 4) if chosen else text,
+                fg=COLOR_GOLD if chosen else fg,
+                bg=COLOR_PANEL_LIGHT if chosen else COLOR_PANEL,
             )
     console.print(
         x0 + 2,
         y0 + height - 2,
-        "a-h take   Del put   ESC close"[: width - 4],
+        "W/S move · Enter take · Del put · Esc"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
@@ -737,7 +745,7 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
             game,
             title=" Put into chest "
             f"(pack {len(game.inventory.items)}/{game.inventory.capacity}) ",
-            hint="a-z put one   ESC done",
+            hint="W/S move · Enter put one · Esc done",
         )
         return
     lines = _container_lines(game, chest.items)
@@ -762,18 +770,21 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
             x0 + 2, y0 + 2, "(empty)", fg=COLOR_DIM, bg=COLOR_PANEL
         )
     else:
+        selected = min(game.container_index, len(lines) - 1)
         for i, (line, fg) in enumerate(lines):
+            chosen = i == selected
+            text = line[: width - 4]
             console.print(
                 x0 + 2,
                 y0 + 2 + i,
-                line[: width - 4],
-                fg=fg,
-                bg=COLOR_PANEL,
+                text.ljust(width - 4) if chosen else text,
+                fg=COLOR_GOLD if chosen else fg,
+                bg=COLOR_PANEL_LIGHT if chosen else COLOR_PANEL,
             )
     console.print(
         x0 + 2,
         y0 + height - 2,
-        "a-z take   Del put   ESC close"[: width - 4],
+        "W/S move · Enter take · Del put · Esc"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )

@@ -19,6 +19,7 @@ from constants import (
     MAP_VIEW_H,
     MODE_AIM,
     MODE_CHEST,
+    MODE_INVENTORY,
     MODE_MAP,
     MODE_MENU,
     MODE_PAUSE,
@@ -26,6 +27,7 @@ from constants import (
     MODE_RUN_MODES,
     MODE_SHOP,
     MODE_SLOTS,
+    MODE_TRASH,
     SCREEN_H,
     SCREEN_W,
     TILE_H,
@@ -346,6 +348,15 @@ def _repeatable_action(game: Game, sym: KeySym) -> bool:
             KeySym.K,
             KeySym.J,
         )
+    if game.mode in (MODE_INVENTORY, MODE_TRASH, MODE_CHEST):
+        return sym in (
+            KeySym.UP,
+            KeySym.DOWN,
+            KeySym.W,
+            KeySym.S,
+            KeySym.K,
+            KeySym.J,
+        )
     if game.mode == MODE_SHOP:
         return (
             not game.shop_sell_mode
@@ -389,9 +400,9 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
     if game.mode == "help":
         game.close_help()
         return False
-    if game.mode == "inventory":
+    if game.mode == MODE_INVENTORY:
         return _handle_inventory(game, event)
-    if game.mode == "trash":
+    if game.mode == MODE_TRASH:
         return _handle_trash(game, event)
     if game.mode == MODE_CHEST:
         return _handle_chest(game, event)
@@ -593,7 +604,19 @@ def _handle_pause(game: Game, event: tcod.event.KeyDown) -> bool:
 def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
     if sym in (KeySym.ESCAPE, KeySym.TAB):
-        game.mode = "playing"
+        game.mode = MODE_PLAYING
+        return False
+    if sym in (KeySym.UP, KeySym.W, KeySym.K):
+        game.inventory_move(-1)
+        return False
+    if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+        game.inventory_move(1)
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        idx = game.inventory_selected()
+        if idx is not None and game.use_inventory(idx):
+            if game.mode == MODE_INVENTORY:
+                game.mode = MODE_PLAYING
         return False
     letter = _letter(event)
     if letter:
@@ -601,35 +624,64 @@ def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
         if idx is None:
             game.msg("No item in that slot.")
             return False
-        if game.use_inventory(idx) and game.mode == "inventory":
-            game.mode = "playing"
+        game.inventory_index = idx
+        if game.use_inventory(idx) and game.mode == MODE_INVENTORY:
+            game.mode = MODE_PLAYING
     return False
 
 
 def _handle_trash(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
-    if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
+    if sym in (KeySym.ESCAPE, KeySym.TAB):
         if game.trash_deposit_mode:
             game.trash_deposit_mode = False
         else:
             game.close_trash()
         return False
     if game.trash_deposit_mode:
+        if sym in (KeySym.UP, KeySym.W, KeySym.K):
+            game.inventory_move(-1)
+            return False
+        if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+            game.inventory_move(1)
+            return False
+        if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+            idx = game.inventory_selected()
+            if idx is not None:
+                game.put_in_trash(idx)
+            return False
         letter = _letter(event)
         if letter:
             idx = game.inventory.letter_index(letter)
             if idx is None:
                 game.msg("No item in that slot.")
                 return False
+            game.inventory_index = idx
             game.put_in_trash(idx)
         return False
+    if sym == KeySym.I:
+        game.close_trash()
+        return False
+    if sym in (KeySym.UP, KeySym.W, KeySym.K):
+        game.container_move(-1)
+        return False
+    if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+        game.container_move(1)
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        idx = game.container_selected()
+        if idx is not None:
+            game.take_from_trash(idx)
+        return False
     if sym in (KeySym.DELETE, KeySym.BACKSPACE):
+        game.inventory_index = 0
         game.trash_deposit_mode = True
         return False
     letter = _letter(event)
     if letter:
         idx = ord(letter) - ord("a")
         if idx < len(game.trash_items):
+            game.container_index = idx
             game.take_from_trash(idx)
         else:
             game.msg("No item in that slot.")
@@ -638,22 +690,49 @@ def _handle_trash(game: Game, event: tcod.event.KeyDown) -> bool:
 
 def _handle_chest(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
-    if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
+    if sym in (KeySym.ESCAPE, KeySym.TAB):
         if game.chest_deposit_mode:
             game.chest_deposit_mode = False
         else:
             game.close_chest()
         return False
     if game.chest_deposit_mode:
+        if sym in (KeySym.UP, KeySym.W, KeySym.K):
+            game.inventory_move(-1)
+            return False
+        if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+            game.inventory_move(1)
+            return False
+        if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+            idx = game.inventory_selected()
+            if idx is not None:
+                game.put_in_chest(idx)
+            return False
         letter = _letter(event)
         if letter:
             idx = game.inventory.letter_index(letter)
             if idx is None:
                 game.msg("No item in that slot.")
                 return False
+            game.inventory_index = idx
             game.put_in_chest(idx)
         return False
+    if sym == KeySym.I:
+        game.close_chest()
+        return False
+    if sym in (KeySym.UP, KeySym.W, KeySym.K):
+        game.container_move(-1)
+        return False
+    if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+        game.container_move(1)
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        idx = game.container_selected()
+        if idx is not None:
+            game.take_from_chest(idx)
+        return False
     if sym in (KeySym.DELETE, KeySym.BACKSPACE):
+        game.inventory_index = 0
         game.chest_deposit_mode = True
         return False
     letter = _letter(event)
@@ -661,6 +740,7 @@ def _handle_chest(game: Game, event: tcod.event.KeyDown) -> bool:
         chest = game.active_chest
         idx = ord(letter) - ord("a")
         if chest is not None and idx < len(chest.items):
+            game.container_index = idx
             game.take_from_chest(idx)
         else:
             game.msg("No item in that slot.")
