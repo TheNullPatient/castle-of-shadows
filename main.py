@@ -17,6 +17,7 @@ from constants import (
     KEY_REPEAT_INTERVAL,
     LOG_H,
     MAP_VIEW_H,
+    MODE_AIM,
     MODE_CHEST,
     MODE_MAP,
     MODE_MENU,
@@ -48,6 +49,17 @@ MOVE_KEYS = {
     KeySym.A: (-1, 0),
     KeySym.D: (1, 0),
 }
+
+# Прицел: те же кардинальные клавиши плюс диагонали y/u/b/n.
+AIM_KEYS = dict(MOVE_KEYS)
+AIM_KEYS.update(
+    {
+        KeySym.Y: (-1, -1),
+        KeySym.U: (1, -1),
+        KeySym.B: (-1, 1),
+        KeySym.N: (1, 1),
+    }
+)
 
 
 # Глифы, которые реально встречаются в интерфейсе. Полный набор DejaVu
@@ -187,7 +199,7 @@ LOG_SCROLL_KEYS = {
 }
 
 REPEATABLE_KEYS = (
-    set(MOVE_KEYS)
+    set(AIM_KEYS)
     | LOG_SCROLL_KEYS
     | {KeySym.PERIOD, KeySym.KP_PERIOD, KeySym.SPACE}
 )
@@ -315,6 +327,8 @@ def _repeatable_action(game: Game, sym: KeySym) -> bool:
     """Разрешён ли автоповтор этой клавиши в текущем режиме."""
     if sym not in REPEATABLE_KEYS:
         return False
+    if game.mode == MODE_AIM:
+        return sym in AIM_KEYS
     if game.mode == MODE_PLAYING:
         return True
     if game.mode == MODE_MAP:
@@ -380,6 +394,8 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return _handle_chest(game, event)
     if game.mode == MODE_SHOP:
         return _handle_shop(game, event)
+    if game.mode == MODE_AIM:
+        return _handle_aim(game, event)
 
     sym = event.sym
     if sym == KeySym.ESCAPE:
@@ -398,7 +414,7 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         game.interact()
         return False
     if sym == KeySym.F:
-        game.fire_ranged()
+        game.start_aim()
         return False
     if sym == KeySym.X:
         game.search()
@@ -450,6 +466,22 @@ def _handle_map(game: Game, event: tcod.event.KeyDown) -> bool:
         return False
     if sym in (KeySym.HOME, KeySym.C):
         game.center_map()
+    return False
+
+
+def _handle_aim(game: Game, event: tcod.event.KeyDown) -> bool:
+    """Режим прицела: направление, выстрел и отмена."""
+    sym = event.sym
+    if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
+        game.cancel_aim()
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE, KeySym.F):
+        game.fire_aimed()
+        return False
+    if sym in AIM_KEYS:
+        dx, dy = AIM_KEYS[sym]
+        game.set_aim(dx, dy)
+        return False
     return False
 
 

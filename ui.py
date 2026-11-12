@@ -7,6 +7,8 @@ from datetime import datetime
 import tcod.console
 
 from constants import (
+    AIM_PATH_CHAR,
+    AIM_TARGET_CHAR,
     ALTAR_CHAR,
     CHEST_CAPACITY,
     CHEST_CHAR,
@@ -14,6 +16,8 @@ from constants import (
     BIOME_NAMES,
     biome_index,
     COLOR_ALTAR,
+    COLOR_AIM,
+    COLOR_AIM_TARGET,
     COLOR_BG,
     COLOR_CAMP_FLOOR,
     COLOR_CHEST,
@@ -52,6 +56,7 @@ from constants import (
     MAP_VIEW_W,
     MAX_DEPTH,
     MERCHANT_CHAR,
+    MODE_AIM,
     MODE_CHEST,
     MODE_MAP,
     MODE_MENU,
@@ -73,7 +78,7 @@ from game import MSG_COLORS, Game
 HELP_ROWS = [
     ("Move", "WASD / arrows / hjkl"),
     ("Attack", "bump into an enemy"),
-    ("Shoot", "f: bow hits nearest foe in range"),
+    ("Shoot", "f: aim with WASD/arrows, Enter to fire"),
     ("Search", "x: find traps / secret doors nearby"),
     ("Wait", ". or Space"),
     ("Pick up", "walk over an item (gold auto)"),
@@ -157,6 +162,8 @@ def render(console: tcod.console.Console, game: Game) -> None:
         _render_chest(console, game)
     elif game.mode == MODE_SHOP:
         _render_shop(console, game)
+    elif game.mode == MODE_AIM:
+        _render_aim(console, game)
     elif game.mode == MODE_PAUSE:
         _render_pause(console, game)
 
@@ -508,6 +515,35 @@ def _render_hint(console: tcod.console.Console) -> None:
         (" help", COLOR_DIM),
     ]
     _print_segments(console, 0, HINT_Y, segments, COLOR_PANEL, SCREEN_W)
+
+
+def _render_aim(console: tcod.console.Console, game: Game) -> None:
+    """Луч прицела поверх карты и подсказка в нижней строке."""
+    info = game.aim_info()
+    left, top = game.camera()
+    target = info["target"]
+    for x, y in info["path"]:
+        sx, sy = x - left, y - top
+        if not (0 <= sx < VIEW_W and 0 <= sy < VIEW_H):
+            continue
+        if target is not None and (target.x, target.y) == (x, y):
+            _put(console, sx, sy, AIM_TARGET_CHAR, COLOR_AIM_TARGET)
+        else:
+            _put(console, sx, sy, AIM_PATH_CHAR, COLOR_AIM)
+    console.draw_rect(
+        0, HINT_Y, SCREEN_W, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL
+    )
+    if target is not None:
+        detail = f"target: {target.name}"
+    elif info["path"]:
+        detail = "blocked"
+    else:
+        detail = "empty"
+    hint = (
+        f" AIM · {info['label']} · {detail} · WASD/arrows turn"
+        " · Enter shoot · Esc cancel"
+    )
+    console.print(0, HINT_Y, hint[:SCREEN_W], fg=COLOR_AIM, bg=COLOR_PANEL)
 
 
 def _render_inventory(

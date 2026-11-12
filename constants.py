@@ -80,6 +80,10 @@ ARMOR_WEAR_PER_HIT = 2
 # Дальний бой: лук бьёт по ближайшему видимому врагу в этом радиусе.
 PLAYER_RANGED_RANGE = 6
 
+# Прицеливание: маркеры луча и выбранной цели.
+AIM_PATH_CHAR = "·"
+AIM_TARGET_CHAR = "X"
+
 # Прочность снаряжения в контейнерах. В сундуках вещи чаще целые, в мусорке
 # чаще уже потрёпанные; доля считается от максимальной прочности.
 CHEST_GEAR_INTACT = 0.55
@@ -178,6 +182,8 @@ COLOR_SECRET_DOOR = (220, 180, 120)
 COLOR_SECRET_FLOOR = (88, 70, 110)
 COLOR_ALTAR = (150, 235, 255)
 COLOR_SHRINE_FLOOR = (66, 92, 118)
+COLOR_AIM = (255, 240, 150)
+COLOR_AIM_TARGET = (255, 100, 90)
 COLOR_VAULT_FLOOR = (108, 98, 70)
 COLOR_GUARDED_FLOOR = (104, 72, 72)
 COLOR_CAMP_FLOOR = (78, 104, 82)
@@ -222,6 +228,7 @@ MODE_INVENTORY = "inventory"
 MODE_TRASH = "trash"
 MODE_CHEST = "chest"
 MODE_SHOP = "shop"
+MODE_AIM = "aim"
 MODE_HELP = "help"
 MODE_DEAD = "dead"
 MODE_MAP = "map"

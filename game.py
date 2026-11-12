@@ -44,6 +44,7 @@ from constants import (
     MAX_ENEMIES,
     MERCHANT_DEPTH_OFFSET,
     MERCHANT_DEPTH_STEP,
+    MODE_AIM,
     MODE_CHEST,
     MODE_DEAD,
     MODE_HELP,
@@ -134,6 +135,17 @@ SPECIAL_ROOM_TEXT = {
     "shrine": "You enter a silent shrine. An altar glows faintly.",
 }
 
+DIRECTION_NAMES = {
+    (0, -1): "North",
+    (1, -1): "North-East",
+    (1, 0): "East",
+    (1, 1): "South-East",
+    (0, 1): "South",
+    (-1, 1): "South-West",
+    (-1, 0): "West",
+    (-1, -1): "North-West",
+}
+
 
 class MessageLog:
     def __init__(self) -> None:
@@ -216,6 +228,8 @@ class Game:
         self.merchant_noticed = False
         self.shop_index = 0
         self.shop_sell_mode = False
+        self.aim_dx = 1
+        self.aim_dy = 0
         self.traps: list[Trap] = []
         self.secret_doors: set[tuple[int, int]] = set()
         self.secret_hinted = False
@@ -438,6 +452,8 @@ class Game:
         self.merchant_noticed = False
         self.shop_index = 0
         self.shop_sell_mode = False
+        self.aim_dx = 1
+        self.aim_dy = 0
         self.traps = []
         self.secret_doors = set()
         self.secret_hinted = False
@@ -1487,7 +1503,7 @@ class Game:
                 self._kill_enemy(defender)
 
     def fire_ranged(self) -> bool:
-        """Выстрелить из лука по ближайшему видимому врагу."""
+        """Выстрелить из лука по ближайшему видимому врагу (автоцель)."""
         if self.game_over:
             return False
         weapon = self.inventory.weapon
@@ -1498,6 +1514,114 @@ class Game:
         if target is None:
             self.msg("No target within bow range.", "warn")
             return False
+        self._shoot_target(target, weapon)
+        self.player_acted()
+        return True
+
+    # --- ручное прицеливание ----------------------------------------------
+
+    def start_aim(self) -> bool:
+        """Войти в режим прицела; без лука — только сообщение."""
+        if self.game_over or self.player is None:
+            return False
+        weapon = self.inventory.weapon
+        if weapon is None or weapon.effect != "ranged":
+            self.msg("Equip a bow to aim.", "warn")
+            return False
+        target = self._ranged_target()
+        if target is not None:
+            self.aim_dx = (target.x > self.player.x) - (
+                target.x < self.player.x
+            )
+            self.aim_dy = (target.y > self.player.y) - (
+                target.y < self.player.y
+            )
+        elif self.aim_dx == 0 and self.aim_dy == 0:
+            self.aim_dx, self.aim_dy = 1, 0
+        self.mode = MODE_AIM
+        return True
+
+    def set_aim(self, dx: int, dy: int) -> None:
+        """Повернуть прицел; направление всегда нормализуется к 8 сторонам."""
+        if dx == 0 and dy == 0:
+            return
+        self.aim_dx = max(-1, min(1, dx))
+        self.aim_dy = max(-1, min(1, dy))
+
+    def cancel_aim(self) -> bool:
+        if self.mode != MODE_AIM:
+            return False
+        self.mode = MODE_PLAYING
+        return True
+
+    def aim_label(self) -> str:
+        return DIRECTION_NAMES.get((self.aim_dx, self.aim_dy), "East")
+
+    def _shot_blocked(self, x: int, y: int) -> bool:
+        """Стрела не проходит сквозь сундук, торговца, алтарь и мусорку."""
+        return (
+            self.chest_at(x, y) is not None
+            or (x, y) == self.merchant_pos
+            or (x, y) == self.altar_pos
+            or (x, y) == self.trash_pos
+        )
+
+    def aim_path(self) -> tuple[list[tuple[int, int]], Entity | None]:
+        """Клетки луча до первой преграды и враг, если он на линии."""
+        if self.player is None:
+            return [], None
+        px, py = self.player.x, self.player.y
+        cells: list[tuple[int, int]] = []
+        for step in range(1, PLAYER_RANGED_RANGE + 1):
+            nx = px + self.aim_dx * step
+            ny = py + self.aim_dy * step
+            if not self.dungeon.in_bounds(nx, ny):
+                break
+            if not self.walkable(nx, ny):
+                break
+            enemy = self.enemy_at(nx, ny)
+            if enemy is not None and enemy.alive():
+                cells.append((nx, ny))
+                return cells, enemy
+            if self._shot_blocked(nx, ny):
+                break
+            cells.append((nx, ny))
+        return cells, None
+
+    def aim_info(self) -> dict:
+        """Данные для HUD: направление, клетки луча и выбранная цель."""
+        path, target = self.aim_path()
+        return {
+            "dx": self.aim_dx,
+            "dy": self.aim_dy,
+            "label": self.aim_label(),
+            "path": path,
+            "target": target,
+        }
+
+    def fire_aimed(self) -> bool:
+        """Выстрелить в выбранном направлении и выйти из прицела."""
+        if self.game_over or self.player is None:
+            return False
+        weapon = self.inventory.weapon
+        if weapon is None or weapon.effect != "ranged":
+            self.mode = MODE_PLAYING
+            self.msg("Equip a bow to shoot at range.", "warn")
+            return False
+        _path, target = self.aim_path()
+        label = self.aim_label()
+        self.mode = MODE_PLAYING
+        if target is None:
+            self.msg(f"Your arrow flies {label.lower()} into the dark.", "warn")
+            self._wear_equipment(weapon, 1)
+            self.player_acted()
+            return True
+        self._shoot_target(target, weapon)
+        self.player_acted()
+        return True
+
+    def _shoot_target(self, target: Entity, weapon: Item) -> int:
+        """Нанести урон стрелой, износить лук и убрать павшего врага."""
         dist = max(
             abs(target.x - self.player.x),
             abs(target.y - self.player.y),
@@ -1518,8 +1642,7 @@ class Game:
         self._wear_equipment(weapon, wear)
         if not target.alive():
             self._kill_enemy(target)
-        self.player_acted()
-        return True
+        return dmg
 
     def _ranged_target(self) -> Entity | None:
         targets = [
