@@ -427,7 +427,12 @@ def age_trash_gear(item: Item) -> Item:
     )
 
 
-def random_loot(x: int, y: int, depth: int) -> Item:
+def random_loot(
+    x: int,
+    y: int,
+    depth: int,
+    allow_ranged: bool = True,
+) -> Item:
     roll = random.random()
     if roll < 0.28:
         return Item("Gold", "$", "gold", COLOR_GOLD, x, y, random.randint(3, 8 + depth))
@@ -435,7 +440,7 @@ def random_loot(x: int, y: int, depth: int) -> Item:
         item = random.choice(POTION_TABLE).copy_at(x, y)
         return _scale_consumable(item, depth)
     if roll < 0.70:
-        if depth >= 2 and random.random() < 0.28:
+        if allow_ranged and depth >= 2 and random.random() < 0.28:
             return random.choice(_bow_pool(depth)).copy_at(x, y)
         return random.choice(_weapon_pool(depth)).copy_at(x, y)
     if roll < 0.86:
@@ -444,7 +449,11 @@ def random_loot(x: int, y: int, depth: int) -> Item:
     return _scale_consumable(item, depth)
 
 
-def make_chest_loot(depth: int, guarded: bool = False) -> list[Item]:
+def make_chest_loot(
+    depth: int,
+    guarded: bool = False,
+    allow_ranged: bool = True,
+) -> list[Item]:
     """Содержимое сундука: золото плюс 2-4 предмета по глубине."""
     low = 10 + depth * 3
     high = 18 + depth * 5
@@ -471,7 +480,7 @@ def make_chest_loot(depth: int, guarded: bool = False) -> list[Item]:
                 )
             )
         elif random.random() < 0.5:
-            if depth >= 2 and random.random() < 0.28:
+            if allow_ranged and depth >= 2 and random.random() < 0.28:
                 gear = random.choice(_bow_pool(depth)).copy()
             else:
                 gear = random.choice(_weapon_pool(depth)).copy()

@@ -74,6 +74,7 @@ from constants import (
     VIEW_H,
     VIEW_W,
     RUN_MODE_AVAILABLE,
+    RUN_MODE_CLASSIC,
     RUN_MODE_DESCRIPTIONS,
     RUN_MODE_NAMES,
     RUN_MODE_ORDER,
@@ -162,7 +163,7 @@ def render(console: tcod.console.Console, game: Game) -> None:
     _render_entities(console, game)
     _render_status(console, game)
     _render_log(console, game)
-    _render_hint(console)
+    _render_hint(console, game)
     if game.mode == "inventory":
         _render_inventory(console, game)
     elif game.mode == "trash":
@@ -500,25 +501,35 @@ def _render_log(console: tcod.console.Console, game: Game) -> None:
         )
 
 
-def _render_hint(console: tcod.console.Console) -> None:
+def _render_hint(console: tcod.console.Console, game: Game) -> None:
     console.draw_rect(0, HINT_Y, SCREEN_W, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL)
     segments = [
         (" WASD", COLOR_UI),
         (" · ", COLOR_DIM),
         (".", COLOR_UI),
         (" wait", COLOR_DIM),
-        (" · ", COLOR_DIM),
-        ("f", COLOR_UI),
-        (" bow", COLOR_DIM),
+    ]
+    if game.run_mode != RUN_MODE_CLASSIC:
+        segments += [
+            (" · ", COLOR_DIM),
+            ("f", COLOR_UI),
+            (" bow", COLOR_DIM),
+        ]
+    segments += [
         (" · ", COLOR_DIM),
         ("Tab", COLOR_UI),
         (" inv", COLOR_DIM),
         (" · ", COLOR_DIM),
         ("i", COLOR_UI),
         (" use", COLOR_DIM),
-        (" · ", COLOR_DIM),
-        ("x", COLOR_UI),
-        (" search", COLOR_DIM),
+    ]
+    if game.run_mode != RUN_MODE_CLASSIC:
+        segments += [
+            (" · ", COLOR_DIM),
+            ("x", COLOR_UI),
+            (" search", COLOR_DIM),
+        ]
+    segments += [
         (" · ", COLOR_DIM),
         ("?", COLOR_UI),
         (" help", COLOR_DIM),
@@ -960,7 +971,9 @@ def _render_run_modes(console: tcod.console.Console, game: Game) -> None:
     console.print(
         x0 + 2,
         note_y,
-        (note or "General is the current full game.")[: width - 4],
+        (note or "General is the full game; Classic is one screen.")[
+            : width - 4
+        ],
         fg=COLOR_WARN if note else COLOR_DIM,
         bg=COLOR_BG,
     )

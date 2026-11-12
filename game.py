@@ -63,6 +63,7 @@ from constants import (
     PLAYER_RANGED_RANGE,
     REPAIR_COST_DIVISOR,
     RUN_MODE_AVAILABLE,
+    RUN_MODE_CLASSIC,
     RUN_MODE_GENERAL,
     RUN_MODE_NAMES,
     RUN_MODE_ORDER,
@@ -190,11 +191,17 @@ class Game:
         "Quit to Desktop without saving",
     )
 
-    def __init__(self, build_level: bool = True) -> None:
+    def __init__(
+        self,
+        build_level: bool = True,
+        run_mode: str = RUN_MODE_GENERAL,
+    ) -> None:
         self.mode = MODE_MENU
         self.menu_index = 0
-        self.run_mode = RUN_MODE_GENERAL
-        self.new_run_mode = RUN_MODE_GENERAL
+        if run_mode not in RUN_MODE_NAMES:
+            run_mode = RUN_MODE_GENERAL
+        self.run_mode = run_mode
+        self.new_run_mode = run_mode
         self.run_mode_index = 0
         self.run_mode_note = ""
         self.help_return_mode = MODE_MENU
@@ -390,10 +397,8 @@ class Game:
         """Начать новый забег в выбранном слоте."""
         delete_save(slot)
         run_mode = self.new_run_mode
-        self.__init__()
+        self.__init__(run_mode=run_mode)
         self.slot = slot
-        self.run_mode = run_mode
-        self.new_run_mode = run_mode
         self.mode = MODE_PLAYING
         self.save()
 
@@ -464,10 +469,22 @@ class Game:
         """Яд глубже бьёт больнее, иначе 6 ходов по 1 почти незаметны."""
         return POISON_DAMAGE + self.depth // POISON_PER_DEPTH
 
+    def level_dimensions(self) -> tuple[int, int]:
+        """Classic — один экран, general — большой этаж с камерой."""
+        if self.run_mode == RUN_MODE_CLASSIC:
+            return VIEW_W, VIEW_H
+        return MAP_W, MAP_H
+
+    @property
+    def allow_ranged_loot(self) -> bool:
+        """В classic нет луков: только ближний бой."""
+        return self.run_mode != RUN_MODE_CLASSIC
+
     def new_level(self, first: bool = False) -> None:
         if not first:
             self._expire_maps()
-        self.dungeon = Dungeon(MAP_W, MAP_H)
+        width, height = self.level_dimensions()
+        self.dungeon = Dungeon(width, height)
         r0 = self.dungeon.rooms[0]
         px = r0[0] + r0[2] // 2
         py = r0[1] + r0[3] // 2
@@ -595,10 +612,16 @@ class Game:
             count += 1
         for idx in random.sample(candidates, min(count, len(candidates))):
             room = rooms[idx]
-            kind = random.choices(
-                ("vault", "guarded", "camp", "shrine"),
-                weights=(0.36, 0.27, 0.17, 0.20),
-            )[0]
+            if self.run_mode == RUN_MODE_CLASSIC:
+                kind = random.choices(
+                    ("vault", "guarded", "camp"),
+                    weights=(0.46, 0.34, 0.20),
+                )[0]
+            else:
+                kind = random.choices(
+                    ("vault", "guarded", "camp", "shrine"),
+                    weights=(0.36, 0.27, 0.17, 0.20),
+                )[0]
             if kind == "shrine" and self.altar_pos is not None:
                 kind = "camp"
             self.special_rooms.append((*room, kind))
@@ -610,7 +633,14 @@ class Game:
             elif kind == "vault":
                 pos = self._free_spot_in_room(room)
                 if pos is not None:
-                    self.items.append(random_loot(pos[0], pos[1], self.depth))
+                    self.items.append(
+                        random_loot(
+                            pos[0],
+                            pos[1],
+                            self.depth,
+                            allow_ranged=self.allow_ranged_loot,
+                        )
+                    )
             elif kind == "shrine":
                 pos = self._free_spot_in_room(room)
                 if pos is not None:
@@ -620,11 +650,18 @@ class Game:
                     pos = self._free_spot_in_room(room)
                     if pos is not None:
                         self.items.append(
-                            random_loot(pos[0], pos[1], self.depth)
+                            random_loot(
+                                pos[0],
+                                pos[1],
+                                self.depth,
+                                allow_ranged=self.allow_ranged_loot,
+                            )
                         )
 
     def _place_merchant(self) -> None:
         """Поставить торговца в отдельную комнату на заданных этажах."""
+        if self.run_mode == RUN_MODE_CLASSIC:
+            return
         if self.depth % MERCHANT_DEPTH_STEP != MERCHANT_DEPTH_OFFSET:
             return
         rooms = [
@@ -670,6 +707,8 @@ class Game:
 
     def _place_secrets(self) -> None:
         """Спрятать 0-2 комнаты за потайными дверями."""
+        if self.run_mode == RUN_MODE_CLASSIC:
+            return
         rooms = [
             room
             for room in self.dungeon.rooms[1:-1]
@@ -804,13 +843,22 @@ class Game:
                 Chest(
                     cx,
                     cy,
-                    items=make_chest_loot(self.depth),
+                    items=make_chest_loot(
+                        self.depth, allow_ranged=self.allow_ranged_loot
+                    ),
                 )
             )
             return
         spots = random.sample(cells, k=min(len(cells), random.randint(2, 3)))
         for spot in spots:
-            self.items.append(random_loot(spot[0], spot[1], self.depth))
+            self.items.append(
+                random_loot(
+                    spot[0],
+                    spot[1],
+                    self.depth,
+                    allow_ranged=self.allow_ranged_loot,
+                )
+            )
         free = [cell for cell in cells if cell not in spots]
         if free:
             gx, gy = random.choice(free)
@@ -830,6 +878,8 @@ class Game:
 
     def _place_traps(self) -> None:
         """Скрытые ловушки в комнатах и коридорах, но не в особых комнатах."""
+        if self.run_mode == RUN_MODE_CLASSIC:
+            return
         count = min(
             TRAP_MAX,
             TRAP_BASE_COUNT + self.depth // TRAP_PER_DEPTH,
@@ -981,7 +1031,11 @@ class Game:
                     pos[0],
                     pos[1],
                     guarded,
-                    items=make_chest_loot(self.depth, guarded),
+                    items=make_chest_loot(
+                        self.depth,
+                        guarded,
+                        allow_ranged=self.allow_ranged_loot,
+                    ),
                 )
             )
 
@@ -1339,7 +1393,14 @@ class Game:
             pos = self._free_spot()
             if pos is None:
                 continue
-            self.items.append(random_loot(pos[0], pos[1], self.depth))
+            self.items.append(
+                random_loot(
+                    pos[0],
+                    pos[1],
+                    self.depth,
+                    allow_ranged=self.allow_ranged_loot,
+                )
+            )
 
     def _spawn_trash_loot(self) -> None:
         """Иногда в мусорке уже лежит что-то полезное."""
@@ -1353,6 +1414,7 @@ class Game:
                 self.trash_pos[0],
                 self.trash_pos[1],
                 self.depth,
+                allow_ranged=self.allow_ranged_loot,
             )
             self.trash_items.append(age_trash_gear(item))
 
@@ -1737,7 +1799,14 @@ class Game:
                 f"You loot {gold} gold from the {enemy.name}.",
                 "gold",
             )
-            self.items.append(random_loot(enemy.x, enemy.y, self.depth))
+            self.items.append(
+                random_loot(
+                    enemy.x,
+                    enemy.y,
+                    self.depth,
+                    allow_ranged=self.allow_ranged_loot,
+                )
+            )
             heal = max(
                 BOSS_HEAL_MIN,
                 int(self.player.max_hp * BOSS_HEAL_RATIO),
@@ -2327,9 +2396,7 @@ class Game:
         """Начать новый забег в том же слоте после смерти."""
         slot = self.slot if self.slot is not None else first_free_slot()
         run_mode = self.run_mode
-        self.__init__()
+        self.__init__(run_mode=run_mode)
         self.slot = slot
-        self.run_mode = run_mode
-        self.new_run_mode = run_mode
         self.mode = MODE_PLAYING
         self.save()

@@ -269,10 +269,10 @@ RUN_MODE_SHORT = {
 }
 RUN_MODE_DESCRIPTIONS = {
     RUN_MODE_GENERAL: "Big floors, shops, traps, secrets",
-    RUN_MODE_CLASSIC: "Compact 25-floor descent",
+    RUN_MODE_CLASSIC: "Single-screen floors, 25 levels",
     RUN_MODE_TICKING: "Timed turns and cooldowns",
     RUN_MODE_ENDURANCE_CLASSIC: "Endless classic survival",
     RUN_MODE_ENDURANCE: "Endless full world",
     RUN_MODE_ENDURANCE_TICKING: "Endless real-time hardcore",
 }
-RUN_MODE_AVAILABLE = {RUN_MODE_GENERAL: True}
+RUN_MODE_AVAILABLE = {RUN_MODE_GENERAL: True, RUN_MODE_CLASSIC: True}

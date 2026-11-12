@@ -7,6 +7,7 @@ from constants import (
     FIRE_DAMAGE,
     FIRE_RADIUS,
     INVENTORY_CAPACITY,
+    RUN_MODE_CLASSIC,
     STACK_LIMITS,
 )
 from entities import Item
@@ -217,6 +218,13 @@ class Inventory:
             game.msg("The world twists. You teleport!", "item")
             return True
         if effect == "mapping":
+            if game.run_mode == RUN_MODE_CLASSIC:
+                # В classic этаж целиком помещается на экране: свиток
+                # раскрывает карту сразу и расходуется, как в старых версиях.
+                self.consume(index)
+                game.reveal_map()
+                game.msg("A map of this floor unfolds in your mind.", "item")
+                return True
             first = not item.map_open
             if first:
                 item.map_open = True
