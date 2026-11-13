@@ -28,8 +28,11 @@ from constants import (
     COLOR_ITEM,
     COLOR_MSG,
     COLOR_WARN,
+    DEFAULT_DISPLAY_MODE,
     DESCEND_HEAL_MIN,
     DESCEND_HEAL_RATIO,
+    DISPLAY_MODE_ORDER,
+    DISPLAY_MODES,
     ENEMY_RANGED_RANGE,
     FOV_RADIUS,
     LEVEL_UP_HEAL_MIN,
@@ -37,8 +40,6 @@ from constants import (
     LOG_H,
     LOG_HISTORY,
     MAP_H,
-    MAP_VIEW_H,
-    MAP_VIEW_W,
     MAP_W,
     MAX_DEPTH,
     MAX_ENEMIES,
@@ -54,6 +55,7 @@ from constants import (
     MODE_PAUSE,
     MODE_PLAYING,
     MODE_RUN_MODES,
+    MODE_SETTINGS,
     MODE_SHOP,
     MODE_SLOTS,
     MODE_TRASH,
@@ -73,6 +75,8 @@ from constants import (
     SECRET_ROOM_CHANCE,
     SECRET_ROOM_EXTRA_CHANCE,
     SECRET_ROOM_EXTRA_DEPTH,
+    SCREEN_H,
+    SCREEN_W,
     SUMMON_COOLDOWN,
     TRAP_BASE_COUNT,
     TRAP_DART_DAMAGE_BASE,
@@ -182,9 +186,10 @@ class MessageLog:
 
 
 class Game:
-    MENU_OPTIONS = ("New Game", "How to Play", "Quit")
+    MENU_OPTIONS = ("New Game", "How to Play", "Settings", "Quit")
     PAUSE_OPTIONS = (
         "Resume",
+        "Settings",
         "Save & Quit to main menu",
         "Quit to main menu without saving",
         "Save & Quit to Desktop",
@@ -195,6 +200,7 @@ class Game:
         self,
         build_level: bool = True,
         run_mode: str = RUN_MODE_GENERAL,
+        display_mode: str | None = None,
     ) -> None:
         self.mode = MODE_MENU
         self.menu_index = 0
@@ -204,6 +210,12 @@ class Game:
         self.new_run_mode = run_mode
         self.run_mode_index = 0
         self.run_mode_note = ""
+        if display_mode not in DISPLAY_MODES:
+            display_mode = DEFAULT_DISPLAY_MODE
+        self.display_mode = display_mode
+        self.display_changed = False
+        self.settings_index = DISPLAY_MODE_ORDER.index(display_mode)
+        self.settings_return_mode = MODE_MENU
         self.help_return_mode = MODE_MENU
         self.slot: int | None = None
         self.pause_index = 0
@@ -273,7 +285,13 @@ class Game:
     def menu_options(self) -> tuple[str, ...]:
         """Пункты главного меню: Continue появляется только при сейвах."""
         if has_any_save():
-            return ("Continue", "New Game", "How to Play", "Quit")
+            return (
+                "Continue",
+                "New Game",
+                "How to Play",
+                "Settings",
+                "Quit",
+            )
         return self.MENU_OPTIONS
 
     def open_run_modes(self) -> None:
@@ -314,6 +332,69 @@ class Game:
     def run_mode_summary(self) -> str:
         """Название режима текущего забега для слотов и паузы."""
         return RUN_MODE_SHORT.get(self.run_mode, "General")
+
+    # --- Отображение и настройки -----------------------------------------
+    def screen_width(self) -> int:
+        """Ширина всей консоли в клетках для выбранного режима."""
+        info = DISPLAY_MODES.get(self.display_mode)
+        if info is None:
+            return SCREEN_W
+        return int(info["width"])
+
+    def screen_height(self) -> int:
+        return SCREEN_H
+
+    def view_width(self) -> int:
+        """Ширина видимой области карты (совпадает с шириной консоли)."""
+        return self.screen_width()
+
+    def view_height(self) -> int:
+        return VIEW_H
+
+    def map_view_width(self) -> int:
+        return max(1, self.screen_width() - 2)
+
+    def map_view_height(self) -> int:
+        return max(1, self.screen_height() - 4)
+
+    def display_label(self) -> str:
+        info = DISPLAY_MODES.get(self.display_mode)
+        return info["label"] if info else self.display_mode
+
+    def display_mode_at(self, index: int) -> str:
+        return DISPLAY_MODE_ORDER[index % len(DISPLAY_MODE_ORDER)]
+
+    def open_settings(self, return_mode: str | None = None) -> None:
+        """Открыть настройки из главного меню или паузы."""
+        if return_mode not in (MODE_MENU, MODE_PAUSE):
+            return_mode = MODE_MENU
+        self.settings_return_mode = return_mode
+        self.settings_index = DISPLAY_MODE_ORDER.index(self.display_mode)
+        self.mode = MODE_SETTINGS
+
+    def close_settings(self) -> None:
+        if self.mode == MODE_SETTINGS:
+            self.mode = self.settings_return_mode
+
+    def settings_move(self, delta: int) -> None:
+        self.settings_index = (
+            self.settings_index + delta
+        ) % len(DISPLAY_MODE_ORDER)
+
+    def selected_display_mode(self) -> str:
+        return self.display_mode_at(self.settings_index)
+
+    def apply_display_selection(self) -> bool:
+        return self.set_display_mode(self.selected_display_mode())
+
+    def set_display_mode(self, mode: str) -> bool:
+        """Сменить режим отображения; main.py пересоздаст окно и консоль."""
+        if mode not in DISPLAY_MODES or mode == self.display_mode:
+            return False
+        self.display_mode = mode
+        self.settings_index = DISPLAY_MODE_ORDER.index(mode)
+        self.display_changed = True
+        return True
 
     def slot_infos(self) -> list[dict | None]:
         return list_slots()
@@ -399,7 +480,8 @@ class Game:
         """Начать новый забег в выбранном слоте."""
         delete_save(slot)
         run_mode = self.new_run_mode
-        self.__init__(run_mode=run_mode)
+        display_mode = self.display_mode
+        self.__init__(run_mode=run_mode, display_mode=display_mode)
         self.slot = slot
         self.mode = MODE_PLAYING
         self.save()
@@ -1511,32 +1593,34 @@ class Game:
         if self.player is None:
             return 0, 0
         width, height = self.dungeon.w, self.dungeon.h
-        if width <= VIEW_W:
-            left = (width - VIEW_W) // 2
+        view_w, view_h = self.view_width(), self.view_height()
+        if width <= view_w:
+            left = (width - view_w) // 2
         else:
             left = min(
-                max(0, self.player.x - VIEW_W // 2),
-                width - VIEW_W,
+                max(0, self.player.x - view_w // 2),
+                width - view_w,
             )
-        if height <= VIEW_H:
-            top = (height - VIEW_H) // 2
+        if height <= view_h:
+            top = (height - view_h) // 2
         else:
             top = min(
-                max(0, self.player.y - VIEW_H // 2),
-                height - VIEW_H,
+                max(0, self.player.y - view_h // 2),
+                height - view_h,
             )
         return left, top
 
     def _clamp_map(self, left: int, top: int) -> tuple[int, int]:
         width, height = self.dungeon.w, self.dungeon.h
-        if width <= MAP_VIEW_W:
-            left = (width - MAP_VIEW_W) // 2
+        view_w, view_h = self.map_view_width(), self.map_view_height()
+        if width <= view_w:
+            left = (width - view_w) // 2
         else:
-            left = min(max(0, left), width - MAP_VIEW_W)
-        if height <= MAP_VIEW_H:
-            top = (height - MAP_VIEW_H) // 2
+            left = min(max(0, left), width - view_w)
+        if height <= view_h:
+            top = (height - view_h) // 2
         else:
-            top = min(max(0, top), height - MAP_VIEW_H)
+            top = min(max(0, top), height - view_h)
         return left, top
 
     def map_camera(self) -> tuple[int, int]:
@@ -1557,8 +1641,8 @@ class Game:
         if self.player is None:
             return
         self.map_left, self.map_top = self._clamp_map(
-            self.player.x - MAP_VIEW_W // 2,
-            self.player.y - MAP_VIEW_H // 2,
+            self.player.x - self.map_view_width() // 2,
+            self.player.y - self.map_view_height() // 2,
         )
 
     def scroll_map(self, dx: int, dy: int) -> None:
@@ -2466,7 +2550,8 @@ class Game:
         """Начать новый забег в том же слоте после смерти."""
         slot = self.slot if self.slot is not None else first_free_slot()
         run_mode = self.run_mode
-        self.__init__(run_mode=run_mode)
+        display_mode = self.display_mode
+        self.__init__(run_mode=run_mode, display_mode=display_mode)
         self.slot = slot
         self.mode = MODE_PLAYING
         self.save()

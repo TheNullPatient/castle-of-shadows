@@ -16,7 +16,6 @@ from constants import (
     KEY_REPEAT_DELAY,
     KEY_REPEAT_INTERVAL,
     LOG_H,
-    MAP_VIEW_H,
     MODE_AIM,
     MODE_CHEST,
     MODE_INVENTORY,
@@ -25,17 +24,17 @@ from constants import (
     MODE_PAUSE,
     MODE_PLAYING,
     MODE_RUN_MODES,
+    MODE_SETTINGS,
     MODE_SHOP,
     MODE_SLOTS,
     MODE_TRASH,
-    SCREEN_H,
-    SCREEN_W,
     TILE_H,
     TILE_W,
     TTF_PATH,
     TILESET_PATH,
 )
 from game import Game
+from settings import load_display_mode, save_display_mode
 from ui import render
 
 MOVE_KEYS = {
@@ -137,7 +136,9 @@ def load_tileset(tile_w: int = TILE_W, tile_h: int = TILE_H) -> tcod.tileset.Til
     return tcod.tileset.load_tilesheet(TILESET_PATH, 32, 8, tcod.tileset.CHARMAP_TCOD)
 
 
-def _output_size(context: tcod.context.Context) -> tuple[int, int]:
+def _output_size(
+    context: tcod.context.Context, columns: int, rows: int
+) -> tuple[int, int]:
     """Размер окна в физических пикселях (на Retina он вдвое больше)."""
     try:
         width = tcod.ffi.new("int*")
@@ -145,19 +146,21 @@ def _output_size(context: tcod.context.Context) -> tuple[int, int]:
         tcod.lib.SDL_GetRenderOutputSize(context.sdl_renderer.p, width, height)
         return max(1, width[0]), max(1, height[0])
     except Exception:  # pragma: no cover - зависит от платформы
-        return SCREEN_W * TILE_W, SCREEN_H * TILE_H
+        return columns * TILE_W, rows * TILE_H
 
 
-def _fitted_tile_size(context: tcod.context.Context) -> tuple[int, int]:
+def _fitted_tile_size(
+    context: tcod.context.Context, columns: int, rows: int
+) -> tuple[int, int]:
     """Подобрать клетку так, чтобы консоль занимала окно почти 1:1.
 
     Дробное масштабирование заполняет окно по высоте, а смена тайлсета под
     размер окна не даёт SDL растягивать шрифт и делать его мыльным.
     """
-    out_w, out_h = _output_size(context)
+    out_w, out_h = _output_size(context, columns, rows)
     scale = min(
-        out_w / (SCREEN_W * TILE_W),
-        out_h / (SCREEN_H * TILE_H),
+        out_w / (columns * TILE_W),
+        out_h / (rows * TILE_H),
     )
     scale = max(1.0, min(scale, _MAX_SCALE))
     tile_w = min(
@@ -339,7 +342,12 @@ def _repeatable_action(game: Game, sym: KeySym) -> bool:
             KeySym.PAGEUP,
             KeySym.PAGEDOWN,
         )
-    if game.mode in (MODE_MENU, MODE_SLOTS, MODE_PAUSE, MODE_RUN_MODES):
+    if game.mode in (
+        MODE_MENU,
+        MODE_SLOTS,
+        MODE_PAUSE,
+        MODE_RUN_MODES,
+    ):
         return sym in (
             KeySym.UP,
             KeySym.DOWN,
@@ -347,6 +355,21 @@ def _repeatable_action(game: Game, sym: KeySym) -> bool:
             KeySym.S,
             KeySym.K,
             KeySym.J,
+        )
+    if game.mode == MODE_SETTINGS:
+        return sym in (
+            KeySym.UP,
+            KeySym.DOWN,
+            KeySym.W,
+            KeySym.S,
+            KeySym.K,
+            KeySym.J,
+            KeySym.LEFT,
+            KeySym.RIGHT,
+            KeySym.A,
+            KeySym.D,
+            KeySym.H,
+            KeySym.L,
         )
     if game.mode in (MODE_INVENTORY, MODE_TRASH, MODE_CHEST):
         return sym in (
@@ -384,6 +407,8 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return _handle_slots(game, event)
     if game.mode == MODE_RUN_MODES:
         return _handle_run_modes(game, event)
+    if game.mode == MODE_SETTINGS:
+        return _handle_settings(game, event)
     if game.mode == MODE_MAP:
         return _handle_map(game, event)
     if game.mode == MODE_PAUSE:
@@ -473,10 +498,10 @@ def _handle_map(game: Game, event: tcod.event.KeyDown) -> bool:
         game.scroll_map(dx, dy)
         return False
     if sym == KeySym.PAGEUP:
-        game.scroll_map(0, -(MAP_VIEW_H // 2))
+        game.scroll_map(0, -(game.map_view_height() // 2))
         return False
     if sym == KeySym.PAGEDOWN:
-        game.scroll_map(0, MAP_VIEW_H // 2)
+        game.scroll_map(0, game.map_view_height() // 2)
         return False
     if sym in (KeySym.HOME, KeySym.C):
         game.center_map()
@@ -522,6 +547,8 @@ def _handle_menu(game: Game, event: tcod.event.KeyDown) -> bool:
             game.open_run_modes()
         elif choice == "How to Play":
             game.toggle_help()
+        elif choice == "Settings":
+            game.open_settings(MODE_MENU)
         else:
             return True
         return False
@@ -543,6 +570,31 @@ def _handle_run_modes(game: Game, event: tcod.event.KeyDown) -> bool:
         return False
     if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
         game.run_mode_activate()
+        return False
+    return False
+
+
+def _handle_settings(game: Game, event: tcod.event.KeyDown) -> bool:
+    """Выбор режима отображения; применяется по Enter и сохраняется в main."""
+    sym = event.sym
+    if sym in (KeySym.ESCAPE, KeySym.Q):
+        game.close_settings()
+        return False
+    if sym in (KeySym.UP, KeySym.W, KeySym.K, KeySym.LEFT, KeySym.A, KeySym.H):
+        game.settings_move(-1)
+        return False
+    if sym in (
+        KeySym.DOWN,
+        KeySym.S,
+        KeySym.J,
+        KeySym.RIGHT,
+        KeySym.D,
+        KeySym.L,
+    ):
+        game.settings_move(1)
+        return False
+    if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        game.apply_display_selection()
         return False
     return False
 
@@ -585,6 +637,8 @@ def _handle_pause(game: Game, event: tcod.event.KeyDown) -> bool:
         choice = options[game.pause_index]
         if choice == "Resume":
             game.close_pause()
+        elif choice == "Settings":
+            game.open_settings(MODE_PAUSE)
         elif choice.startswith("Save & Quit to main"):
             game.return_to_menu()
         elif choice.startswith("Quit to main"):
@@ -792,12 +846,15 @@ def _handle_shop(game: Game, event: tcod.event.KeyDown) -> bool:
 
 
 def main() -> None:
+    use_display_mode = load_display_mode()
+    game = Game(build_level=False, display_mode=use_display_mode)
+    screen_w, screen_h = game.screen_width(), game.screen_height()
     tileset = load_tileset()
     with tcod.context.new(
-        columns=SCREEN_W,
-        rows=SCREEN_H,
-        width=SCREEN_W * TILE_W,
-        height=SCREEN_H * TILE_H,
+        columns=screen_w,
+        rows=screen_h,
+        width=screen_w * TILE_W,
+        height=screen_h * TILE_H,
         tileset=tileset,
         title="Castle of Shadows",
         vsync=True,
@@ -806,8 +863,7 @@ def main() -> None:
             | tcod.context.SDL_WINDOW_ALLOW_HIGHDPI
         ),
     ) as context:
-        console = tcod.console.Console(SCREEN_W, SCREEN_H, order="F")
-        game = Game(build_level=False)
+        console = tcod.console.Console(screen_w, screen_h, order="F")
         needs_fit = True
         settling = False
         repeat = KeyRepeat()
@@ -816,7 +872,9 @@ def main() -> None:
             # Подгоняем шрифт под окно, но не во время перетаскивания:
             # сначала ждём, пока пользователь отпустит край окна.
             if needs_fit and not settling:
-                tile_w, tile_h = _fitted_tile_size(context)
+                tile_w, tile_h = _fitted_tile_size(
+                    context, console.width, console.height
+                )
                 if (tile_w, tile_h) != (
                     tileset.tile_width,
                     tileset.tile_height,
@@ -871,6 +929,21 @@ def main() -> None:
             if settling and not resized:
                 settling = False
                 needs_fit = True
+
+            if game.display_changed:
+                game.display_changed = False
+                save_display_mode(game.display_mode)
+                new_w = game.screen_width()
+                new_h = game.screen_height()
+                console = tcod.console.Console(new_w, new_h, order="F")
+                window = context.sdl_window
+                if window is not None:
+                    try:
+                        window.size = (new_w * TILE_W, new_h * TILE_H)
+                    except Exception as exc:  # pragma: no cover
+                        print(f"Could not resize window: {exc}")
+                needs_fit = True
+                settling = False
 
             active = repeat.active
             if (

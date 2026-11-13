@@ -48,12 +48,12 @@ from constants import (
     COLOR_VAULT_FLOOR,
     COLOR_WARN,
     COLOR_XP,
+    DISPLAY_MODE_ORDER,
+    DISPLAY_MODES,
     FOV_RADIUS,
     HINT_Y,
     LOG_H,
     LOG_Y,
-    MAP_VIEW_H,
-    MAP_VIEW_W,
     MAX_DEPTH,
     MERCHANT_CHAR,
     MODE_AIM,
@@ -62,17 +62,15 @@ from constants import (
     MODE_MENU,
     MODE_PAUSE,
     MODE_RUN_MODES,
+    MODE_SETTINGS,
     MODE_SHOP,
     MODE_SLOTS,
-    SCREEN_H,
     SCREEN_W,
     SECRET_DOOR_CHAR,
     STATUS_Y,
     TRAP_CHAR,
     TRASH_CAPACITY,
     TRASH_CHAR,
-    VIEW_H,
-    VIEW_W,
     RUN_MODE_AVAILABLE,
     RUN_MODE_CLASSIC,
     RUN_MODE_DESCRIPTIONS,
@@ -101,7 +99,7 @@ HELP_ROWS = [
     ("Map scroll", "use it, then reopen from inventory"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),
-    ("Pause", "Esc: menu and desktop options"),
+    ("Pause", "Esc: settings, save/quit, desktop options"),
     ("Quick quit", "Q in pause: save & menu"),
     ("Saves", "5 slots; Continue in the menu"),
     ("Restart", "R (on the death screen)"),
@@ -150,8 +148,11 @@ def render(console: tcod.console.Console, game: Game) -> None:
     if game.mode == MODE_RUN_MODES:
         _render_run_modes(console, game)
         return
+    if game.mode == MODE_SETTINGS:
+        _render_settings(console, game)
+        return
     if game.mode == "help":
-        _render_help(console)
+        _render_help(console, game)
         return
     if game.mode == "dead":
         _render_death(console, game)
@@ -197,13 +198,14 @@ def _special_floor_color(kind: str | None) -> tuple[int, int, int] | None:
 def _render_map(console: tcod.console.Console, game: Game) -> None:
     grid = game.dungeon.grid
     left, top = game.camera()
+    view_w, view_h = game.view_width(), game.view_height()
     wall_color, floor_color = BIOME_COLORS[biome_index(game.depth)]
-    for sy in range(VIEW_H):
+    for sy in range(view_h):
         wy = top + sy
         if not 0 <= wy < game.dungeon.h:
             continue
         row = grid[wy]
-        for sx in range(VIEW_W):
+        for sx in range(view_w):
             wx = left + sx
             if not 0 <= wx < game.dungeon.w:
                 continue
@@ -246,13 +248,15 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
 def _render_full_map(console: tcod.console.Console, game: Game) -> None:
     """Полноэкранная карта этажа с прокруткой."""
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
+    screen_w, screen_h = game.screen_width(), game.screen_height()
+    map_w, map_h = game.map_view_width(), game.map_view_height()
     wall_color, floor_color = BIOME_COLORS[biome_index(game.depth)]
     biome = BIOME_NAMES[biome_index(game.depth)]
     console.draw_frame(
         0,
         0,
-        SCREEN_W,
-        SCREEN_H,
+        screen_w,
+        screen_h,
         title=f" MAP · Depth {game.depth} · {biome} ",
         fg=COLOR_GOLD,
         bg=COLOR_BG,
@@ -260,12 +264,12 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
     )
     left, top = game.map_camera()
     grid = game.dungeon.grid
-    for sy in range(MAP_VIEW_H):
+    for sy in range(map_h):
         wy = top + sy
         if not 0 <= wy < game.dungeon.h:
             continue
         row = grid[wy]
-        for sx in range(MAP_VIEW_W):
+        for sx in range(map_w):
             wx = left + sx
             if not 0 <= wx < game.dungeon.w:
                 continue
@@ -291,27 +295,27 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
     spawn = getattr(game, "spawn", None)
     if spawn is not None and game.is_explored(spawn[0], spawn[1]):
         sx, sy = spawn[0] - left, spawn[1] - top
-        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+        if 0 <= sx < map_w and 0 <= sy < map_h:
             _put(console, 1 + sx, 1 + sy, "<", COLOR_SPAWN, COLOR_BG)
 
     for chest in game.chests:
         if not game.is_explored(chest.x, chest.y):
             continue
         sx, sy = chest.x - left, chest.y - top
-        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+        if 0 <= sx < map_w and 0 <= sy < map_h:
             color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
             _put(console, 1 + sx, 1 + sy, CHEST_CHAR, color, COLOR_BG)
 
     merchant = game.merchant_pos
     if merchant is not None and game.is_explored(merchant[0], merchant[1]):
         sx, sy = merchant[0] - left, merchant[1] - top
-        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+        if 0 <= sx < map_w and 0 <= sy < map_h:
             _put(console, 1 + sx, 1 + sy, MERCHANT_CHAR, COLOR_MERCHANT, COLOR_BG)
 
     altar = game.altar_pos
     if altar is not None and game.is_explored(altar[0], altar[1]):
         sx, sy = altar[0] - left, altar[1] - top
-        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+        if 0 <= sx < map_w and 0 <= sy < map_h:
             color = COLOR_ALTAR if not game.altar_used else COLOR_DIM
             _put(console, 1 + sx, 1 + sy, ALTAR_CHAR, color, COLOR_BG)
 
@@ -319,7 +323,7 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
         if not trap.revealed or not game.is_explored(trap.x, trap.y):
             continue
         sx, sy = trap.x - left, trap.y - top
-        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+        if 0 <= sx < map_w and 0 <= sy < map_h:
             color = COLOR_TRAP if trap.armed else COLOR_TRAP_SPENT
             visible = game.is_visible(trap.x, trap.y)
             _put(
@@ -334,21 +338,34 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
     player = game.player
     if player is not None:
         sx, sy = player.x - left, player.y - top
-        if 0 <= sx < MAP_VIEW_W and 0 <= sy < MAP_VIEW_H:
+        if 0 <= sx < map_w and 0 <= sy < map_h:
             _put(console, 1 + sx, 1 + sy, "@", COLOR_PLAYER, COLOR_BG)
 
     legend = " < spawn   > stairs   & merchant   _ altar   ^ trap   @ you"
-    console.print(1, SCREEN_H - 3, legend[:SCREEN_W - 2], fg=COLOR_DIM, bg=COLOR_BG)
+    console.print(
+        1,
+        screen_h - 3,
+        legend[: screen_w - 2],
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
+    )
     hint = "WASD/arrows scroll · PgUp/PgDn · Home center · Tab/Esc/i close"
-    console.print(1, SCREEN_H - 2, hint[:SCREEN_W - 2], fg=COLOR_DIM, bg=COLOR_BG)
+    console.print(
+        1,
+        screen_h - 2,
+        hint[: screen_w - 2],
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
+    )
 
 
 def _render_entities(console: tcod.console.Console, game: Game) -> None:
     left, top = game.camera()
+    view_w, view_h = game.view_width(), game.view_height()
     spawn = getattr(game, "spawn", None)
     if spawn is not None and game.is_explored(spawn[0], spawn[1]):
         sx, sy = spawn[0] - left, spawn[1] - top
-        if 0 <= sx < VIEW_W and 0 <= sy < VIEW_H:
+        if 0 <= sx < view_w and 0 <= sy < view_h:
             color = (
                 COLOR_SPAWN
                 if game.is_visible(spawn[0], spawn[1])
@@ -411,8 +428,10 @@ def _print_segments(
     y: int,
     segments: list[tuple[str, tuple[int, int, int]]],
     bg: tuple[int, int, int],
-    max_width: int = SCREEN_W,
+    max_width: int | None = None,
 ) -> None:
+    if max_width is None:
+        max_width = console.width
     for text, fg in segments:
         if not text:
             continue
@@ -436,7 +455,7 @@ def _render_status(console: tcod.console.Console, game: Game) -> None:
         hp_color = _tint(hp_color, 0.55)
 
     console.draw_rect(
-        0, STATUS_Y, SCREEN_W, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL_LIGHT
+        0, STATUS_Y, console.width, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL_LIGHT
     )
 
     def build_segments(bar_width: int) -> list[tuple[str, tuple[int, int, int]]]:
@@ -474,35 +493,43 @@ def _render_status(console: tcod.console.Console, game: Game) -> None:
     segments = build_segments(bar_width)
     while (
         bar_width > 3
-        and sum(len(text) for text, _ in segments) > SCREEN_W
+        and sum(len(text) for text, _ in segments) > console.width
     ):
         bar_width -= 1
         segments = build_segments(bar_width)
-    _print_segments(console, 0, STATUS_Y, segments, COLOR_PANEL_LIGHT, SCREEN_W)
+    _print_segments(console, 0, STATUS_Y, segments, COLOR_PANEL_LIGHT)
 
 
 def _render_log(console: tcod.console.Console, game: Game) -> None:
     console.draw_rect(
-        0, LOG_Y, SCREEN_W, LOG_H, ord(" "), fg=COLOR_MSG, bg=COLOR_PANEL
+        0, LOG_Y, console.width, LOG_H, ord(" "), fg=COLOR_MSG, bg=COLOR_PANEL
     )
     for i, (text, color) in enumerate(game.log.view(LOG_H)):
         fg = MSG_COLORS.get(color, COLOR_MSG)
         console.print(
             0,
             LOG_Y + i,
-            text[: SCREEN_W - 1],
+            text[: console.width - 1],
             fg=fg,
             bg=COLOR_PANEL,
         )
     if game.log.offset:
-        console.print(SCREEN_W - 1, LOG_Y, "▲", fg=COLOR_DIM, bg=COLOR_PANEL)
         console.print(
-            SCREEN_W - 1, LOG_Y + LOG_H - 1, "▼", fg=COLOR_DIM, bg=COLOR_PANEL
+            console.width - 1, LOG_Y, "▲", fg=COLOR_DIM, bg=COLOR_PANEL
+        )
+        console.print(
+            console.width - 1,
+            LOG_Y + LOG_H - 1,
+            "▼",
+            fg=COLOR_DIM,
+            bg=COLOR_PANEL,
         )
 
 
 def _render_hint(console: tcod.console.Console, game: Game) -> None:
-    console.draw_rect(0, HINT_Y, SCREEN_W, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL)
+    console.draw_rect(
+        0, HINT_Y, console.width, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL
+    )
     segments = [
         (" WASD", COLOR_UI),
         (" · ", COLOR_DIM),
@@ -534,24 +561,25 @@ def _render_hint(console: tcod.console.Console, game: Game) -> None:
         ("?", COLOR_UI),
         (" help", COLOR_DIM),
     ]
-    _print_segments(console, 0, HINT_Y, segments, COLOR_PANEL, SCREEN_W)
+    _print_segments(console, 0, HINT_Y, segments, COLOR_PANEL)
 
 
 def _render_aim(console: tcod.console.Console, game: Game) -> None:
     """Луч прицела поверх карты и подсказка в нижней строке."""
     info = game.aim_info()
     left, top = game.camera()
+    view_w, view_h = game.view_width(), game.view_height()
     target = info["target"]
     for x, y in info["path"]:
         sx, sy = x - left, y - top
-        if not (0 <= sx < VIEW_W and 0 <= sy < VIEW_H):
+        if not (0 <= sx < view_w and 0 <= sy < view_h):
             continue
         if target is not None and (target.x, target.y) == (x, y):
             _put(console, sx, sy, AIM_TARGET_CHAR, COLOR_AIM_TARGET)
         else:
             _put(console, sx, sy, AIM_PATH_CHAR, COLOR_AIM)
     console.draw_rect(
-        0, HINT_Y, SCREEN_W, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL
+        0, HINT_Y, console.width, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL
     )
     if target is not None:
         detail = f"target: {target.name}"
@@ -563,7 +591,13 @@ def _render_aim(console: tcod.console.Console, game: Game) -> None:
         f" AIM · {info['label']} · {detail} · WASD/arrows turn"
         " · Enter shoot · Esc cancel"
     )
-    console.print(0, HINT_Y, hint[:SCREEN_W], fg=COLOR_AIM, bg=COLOR_PANEL)
+    console.print(
+        0,
+        HINT_Y,
+        hint[: console.width],
+        fg=COLOR_AIM,
+        bg=COLOR_PANEL,
+    )
 
 
 def _render_inventory(
@@ -573,8 +607,8 @@ def _render_inventory(
     hint: str | None = None,
 ) -> None:
     inventory = game.inventory
-    width = VIEW_W
-    height = VIEW_H
+    width = min(game.screen_width(), console.width)
+    height = min(game.view_height(), console.height)
     x0 = 0
     y0 = 0
     frame_title = (
@@ -676,10 +710,14 @@ def _container_lines(game: Game, items: list) -> list[tuple[str, tuple]]:
     return lines
 
 
-def _container_width(lines: list[tuple[str, tuple]]) -> int:
+def _container_width(
+    lines: list[tuple[str, tuple]], max_width: int | None = None
+) -> int:
     """Ширина панели, достаточная для самой длинной строки."""
+    if max_width is None:
+        max_width = SCREEN_W
     longest = max((len(line) for line, _ in lines), default=0)
-    return min(VIEW_W - 2, max(50, longest + 4))
+    return min(max_width - 2, max(50, longest + 4))
 
 
 def _render_trash(console: tcod.console.Console, game: Game) -> None:
@@ -696,10 +734,11 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
         game,
         game.trash_items[:TRASH_CAPACITY],
     )
-    width = _container_width(lines)
-    height = min(VIEW_H, TRASH_CAPACITY + 5)
-    x0 = max(1, (VIEW_W - width) // 2)
-    y0 = max(1, (VIEW_H - height) // 2)
+    view_w, view_h = game.view_width(), game.view_height()
+    width = _container_width(lines, game.screen_width())
+    height = min(view_h, TRASH_CAPACITY + 5)
+    x0 = max(1, (view_w - width) // 2)
+    y0 = max(1, (view_h - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -749,10 +788,11 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
         )
         return
     lines = _container_lines(game, chest.items)
-    width = _container_width(lines)
-    height = min(VIEW_H, max(7, len(chest.items) + 5))
-    x0 = max(1, (VIEW_W - width) // 2)
-    y0 = max(1, (VIEW_H - height) // 2)
+    view_w, view_h = game.view_width(), game.view_height()
+    width = _container_width(lines, game.screen_width())
+    height = min(view_h, max(7, len(chest.items) + 5))
+    x0 = max(1, (view_w - width) // 2)
+    y0 = max(1, (view_h - height) // 2)
     frame_color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
     console.draw_frame(
         x0,
@@ -818,10 +858,11 @@ def _render_shop(console: tcod.console.Console, game: Game) -> None:
     longest = max(
         [len(line) for line, _, _ in rows] + [len(line) for line in header] + [44]
     )
-    width = min(VIEW_W, max(54, longest + 4))
-    height = min(VIEW_H, max(10, len(stock) + 8))
-    x0 = max(1, (VIEW_W - width) // 2)
-    y0 = max(1, (VIEW_H - height) // 2)
+    view_w, view_h = game.view_width(), game.view_height()
+    width = min(view_w, max(54, longest + 4))
+    height = min(view_h, max(10, len(stock) + 8))
+    x0 = max(1, (view_w - width) // 2)
+    y0 = max(1, (view_h - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -884,10 +925,11 @@ def _render_shop_sell(console: tcod.console.Console, game: Game) -> None:
         lines.append(
             (f" {code}) {inventory.label(item)}  {price}g", item.color)
         )
-    width = _container_width(lines)
-    height = min(VIEW_H, max(7, len(lines) + 5))
-    x0 = max(1, (VIEW_W - width) // 2)
-    y0 = max(1, (VIEW_H - height) // 2)
+    width = _container_width(lines, game.screen_width())
+    view_w, view_h = game.view_width(), game.view_height()
+    height = min(view_h, max(7, len(lines) + 5))
+    x0 = max(1, (view_w - width) // 2)
+    y0 = max(1, (view_h - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -936,10 +978,11 @@ def _slot_label(info: dict | None) -> str:
 def _render_run_modes(console: tcod.console.Console, game: Game) -> None:
     """Экран выбора режима забега перед выбором слота."""
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
-    width = min(SCREEN_W - 4, 66)
+    screen_w, screen_h = game.screen_width(), game.screen_height()
+    width = min(screen_w - 4, 66)
     height = len(RUN_MODE_ORDER) * 2 + 7
-    x0 = max(1, (SCREEN_W - width) // 2)
-    y0 = max(1, (SCREEN_H - height) // 2)
+    x0 = max(1, (screen_w - width) // 2)
+    y0 = max(1, (screen_h - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -1001,10 +1044,11 @@ def _render_run_modes(console: tcod.console.Console, game: Game) -> None:
 def _render_slots(console: tcod.console.Console, game: Game) -> None:
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
     infos = game.slot_infos()
-    width = min(SCREEN_W - 4, 68)
-    height = min(SCREEN_H - 2, len(infos) + 8)
-    x0 = max(1, (SCREEN_W - width) // 2)
-    y0 = max(1, (SCREEN_H - height) // 2)
+    screen_w, screen_h = game.screen_width(), game.screen_height()
+    width = min(screen_w - 4, 68)
+    height = min(screen_h - 2, len(infos) + 8)
+    x0 = max(1, (screen_w - width) // 2)
+    y0 = max(1, (screen_h - height) // 2)
     title = " Continue " if game.slot_action == "continue" else " New Game "
     console.draw_frame(
         x0,
@@ -1055,11 +1099,86 @@ def _render_slots(console: tcod.console.Console, game: Game) -> None:
     )
 
 
+def _render_settings(console: tcod.console.Console, game: Game) -> None:
+    """Экран настроек отображения (главное меню и пауза)."""
+    console.clear(fg=COLOR_UI, bg=COLOR_BG)
+    screen_w, screen_h = game.screen_width(), game.screen_height()
+    width = min(screen_w - 4, 74)
+    height = len(DISPLAY_MODE_ORDER) * 2 + 9
+    x0 = max(1, (screen_w - width) // 2)
+    y0 = max(1, (screen_h - height) // 2)
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=" SETTINGS ",
+        fg=COLOR_GOLD,
+        bg=COLOR_BG,
+        clear=True,
+    )
+    console.print(
+        x0 + 2,
+        y0 + 1,
+        "Display mode"[: width - 4],
+        fg=COLOR_UI,
+        bg=COLOR_BG,
+    )
+    console.print(
+        x0 + 2,
+        y0 + 2,
+        f"Current: {game.display_label()}"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
+    )
+    start_y = y0 + 4
+    for i, mode in enumerate(DISPLAY_MODE_ORDER):
+        selected = i == game.settings_index
+        info = DISPLAY_MODES[mode]
+        marker = ">" if selected else " "
+        current = " *" if mode == game.display_mode else ""
+        text = (
+            f"{marker} {info['label']:<14} {info['width']:>3} cols"
+            f"  {info['note']}{current}"
+        )
+        console.print(
+            x0 + 2,
+            start_y + i * 2,
+            text[: width - 4],
+            fg=COLOR_GOLD if selected else COLOR_UI,
+            bg=COLOR_BG,
+        )
+    console.print(
+        x0 + 2,
+        y0 + height - 4,
+        "Floors are unchanged: Classic runs stay 70x22 and centered."[
+            : width - 4
+        ],
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
+    )
+    console.print(
+        x0 + 2,
+        y0 + height - 3,
+        "The choice is saved for the next launch."[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
+    )
+    console.print(
+        x0 + 2,
+        y0 + height - 2,
+        "W/S select · Enter apply · Esc back"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
+    )
+
+
 def _render_pause(console: tcod.console.Console, game: Game) -> None:
-    width = min(VIEW_W - 4, 46)
+    view_w, view_h = game.view_width(), game.view_height()
+    width = min(view_w - 4, 58)
     height = len(game.pause_options()) * 2 + 6
-    x0 = max(1, (VIEW_W - width) // 2)
-    y0 = max(1, (VIEW_H - height) // 2)
+    x0 = max(1, (view_w - width) // 2)
+    y0 = max(1, (view_h - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -1102,10 +1221,11 @@ def _render_pause(console: tcod.console.Console, game: Game) -> None:
 
 def _render_menu(console: tcod.console.Console, game: Game) -> None:
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
-    width = min(SCREEN_W - 8, 54)
-    height = 15
-    x0 = (SCREEN_W - width) // 2
-    y0 = max(2, (SCREEN_H - height) // 2)
+    screen_w, screen_h = game.screen_width(), game.screen_height()
+    width = min(screen_w - 8, 54)
+    height = len(game.menu_options()) * 2 + 7
+    x0 = (screen_w - width) // 2
+    y0 = max(2, (screen_h - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -1145,11 +1265,12 @@ def _render_menu(console: tcod.console.Console, game: Game) -> None:
     )
 
 
-def _render_help(console: tcod.console.Console) -> None:
-    width = min(SCREEN_W - 4, 62)
-    height = min(SCREEN_H - 2, len(HELP_ROWS) + 4)
-    x0 = max(1, (SCREEN_W - width) // 2)
-    y0 = max(1, (SCREEN_H - height) // 2)
+def _render_help(console: tcod.console.Console, game: Game) -> None:
+    screen_w, screen_h = game.screen_width(), game.screen_height()
+    width = min(screen_w - 4, 62)
+    height = min(screen_h - 2, len(HELP_ROWS) + 4)
+    x0 = max(1, (screen_w - width) // 2)
+    y0 = max(1, (screen_h - height) // 2)
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
     console.draw_frame(
         x0,
@@ -1199,10 +1320,11 @@ def _render_death(console: tcod.console.Console, game: Game) -> None:
         ("XP", f"{game.player_xp}/{game.xp_next}"),
     ]
 
-    width = min(SCREEN_W - 6, 50)
+    screen_w, screen_h = game.screen_width(), game.screen_height()
+    width = min(screen_w - 6, 50)
     height = len(stats) + 8
-    x0 = max(1, (SCREEN_W - width) // 2)
-    y0 = max(1, (SCREEN_H - height) // 2)
+    x0 = max(1, (screen_w - width) // 2)
+    y0 = max(1, (screen_h - height) // 2)
 
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
     console.draw_frame(
@@ -1237,7 +1359,7 @@ def _render_death(console: tcod.console.Console, game: Game) -> None:
         )
     prompt = "R restart  ·  any other key exit"
     console.print(
-        max(0, (SCREEN_W - len(prompt)) // 2),
+        max(0, (screen_w - len(prompt)) // 2),
         y0 + height - 2,
         prompt,
         fg=COLOR_DIM,

@@ -23,6 +23,8 @@ MAP_W, MAP_H = 140, 60
 STATUS_H = 1
 LOG_H = 9
 HINT_H = 1
+# Базовая (4:3) ширина консоли. Widescreen-режимы расширяют только её,
+# высота и число строк лога остаются одинаковыми.
 SCREEN_W = VIEW_W
 SCREEN_H = VIEW_H + STATUS_H + LOG_H + HINT_H
 STATUS_Y = VIEW_H
@@ -30,8 +32,24 @@ LOG_Y = VIEW_H + STATUS_H
 HINT_Y = SCREEN_H - 1
 
 # Полноэкранная карта: рамка по краю и строка подсказок внизу.
+# Это размеры для базовой ширины; Game пересчитывает их под выбранный
+# режим отображения (см. DISPLAY_MODES ниже).
 MAP_VIEW_W = SCREEN_W - 2
 MAP_VIEW_H = SCREEN_H - 4
+
+# Режимы отображения. Высота консоли фиксирована, а ширина подобрана так,
+# чтобы окно целиком имело указанное соотношение сторон при клетке 12×20
+# (33 строки: 22 карты + статус + 9 строк лога + подсказка).
+# 4:3 — исторический размер игры, остальные режимы показывают больше карты
+# по горизонтали. Classic-забеги при этом остаются 70×22 и центрируются.
+DISPLAY_MODE_ORDER = ("4:3", "16:10", "16:9", "21:9")
+DISPLAY_MODES = {
+    "4:3": {"label": "Classic 4:3", "width": 70, "note": "classic window"},
+    "16:10": {"label": "Wide 16:10", "width": 88, "note": "a little wider"},
+    "16:9": {"label": "Wide 16:9", "width": 98, "note": "common widescreen"},
+    "21:9": {"label": "Ultra 21:9", "width": 128, "note": "ultrawide"},
+}
+DEFAULT_DISPLAY_MODE = "16:9"
 
 FOV_RADIUS = 11  # радиус обзора; стены на краю подсвечиваются отдельно
 MAX_DEPTH = 25
@@ -230,6 +248,7 @@ MODE_CHEST = "chest"
 MODE_SHOP = "shop"
 MODE_AIM = "aim"
 MODE_RUN_MODES = "run_modes"
+MODE_SETTINGS = "settings"
 MODE_HELP = "help"
 MODE_DEAD = "dead"
 MODE_MAP = "map"
