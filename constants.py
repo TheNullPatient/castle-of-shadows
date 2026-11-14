@@ -27,8 +27,10 @@ HINT_H = 1
 # высота и число строк лога остаются одинаковыми.
 SCREEN_W = VIEW_W
 SCREEN_H = VIEW_H + STATUS_H + LOG_H + HINT_H
-STATUS_Y = VIEW_H
-LOG_Y = VIEW_H + STATUS_H
+# Статус-бар занимает самую верхнюю строку, карта начинается под ним.
+STATUS_Y = 0
+MAP_Y = STATUS_H
+LOG_Y = STATUS_H + VIEW_H
 HINT_Y = SCREEN_H - 1
 
 # Полноэкранная карта: рамка по краю и строка подсказок внизу.
@@ -42,14 +44,20 @@ MAP_VIEW_H = SCREEN_H - 4
 # (33 строки: 22 карты + статус + 9 строк лога + подсказка).
 # 4:3 — исторический размер игры, остальные режимы показывают больше карты
 # по горизонтали. Classic-забеги при этом остаются 70×22 и центрируются.
-DISPLAY_MODE_ORDER = ("4:3", "16:10", "16:9", "21:9")
+DISPLAY_MODE_ORDER = ("auto", "4:3", "16:10", "16:9", "21:9")
 DISPLAY_MODES = {
+    "auto": {
+        "label": "Auto",
+        "width": 98,
+        "note": "fits your screen",
+    },
     "4:3": {"label": "Classic 4:3", "width": 70, "note": "classic window"},
     "16:10": {"label": "Wide 16:10", "width": 88, "note": "a little wider"},
     "16:9": {"label": "Wide 16:9", "width": 98, "note": "common widescreen"},
     "21:9": {"label": "Ultra 21:9", "width": 128, "note": "ultrawide"},
 }
-DEFAULT_DISPLAY_MODE = "16:9"
+AUTO_DISPLAY_MODE = "auto"
+DEFAULT_DISPLAY_MODE = AUTO_DISPLAY_MODE
 
 FOV_RADIUS = 11  # радиус обзора; стены на краю подсвечиваются отдельно
 MAX_DEPTH = 25
@@ -78,7 +86,7 @@ def biome_index(depth: int) -> int:
     return max(0, min(len(BIOME_NAMES) - 1, (depth - 1) // BIOME_SIZE))
 
 
-INVENTORY_CAPACITY = 26  # a-z
+INVENTORY_CAPACITY = 26  # слотов; первые девять — быстрый доступ 1-9
 FIRE_RADIUS = 3
 FIRE_DAMAGE = 12
 AGGRO_RANGE = 7

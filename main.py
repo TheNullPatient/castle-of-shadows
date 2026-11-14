@@ -13,6 +13,7 @@ import tcod.event
 from tcod.event import KeySym
 
 from constants import (
+    AUTO_DISPLAY_MODE,
     KEY_REPEAT_DELAY,
     KEY_REPEAT_INTERVAL,
     LOG_H,
@@ -33,6 +34,7 @@ from constants import (
     TTF_PATH,
     TILESET_PATH,
 )
+from display import auto_window_size
 from game import Game
 from settings import load_display_mode, save_display_mode
 from ui import render
@@ -182,15 +184,14 @@ def _shifted(event: tcod.event.KeyDown) -> bool:
     return bool(mod & getattr(tcod.event, "KMOD_SHIFT", 0x0001))
 
 
-def _letter(event: tcod.event.KeyDown) -> str | None:
-    try:
-        value = int(event.sym)
-    except (TypeError, ValueError):
-        return None
-    if ord("a") <= value <= ord("z"):
-        return chr(value)
-    if ord("A") <= value <= ord("Z"):
-        return chr(value + 32)
+def _digit(event: tcod.event.KeyDown) -> int | None:
+    """Цифра верхнего ряда или цифровой клавиатуры (0-9)."""
+    for digit in range(10):
+        if event.sym in (
+            getattr(KeySym, f"N{digit}"),
+            getattr(KeySym, f"KP_{digit}"),
+        ):
+            return digit
     return None
 
 
@@ -381,16 +382,13 @@ def _repeatable_action(game: Game, sym: KeySym) -> bool:
             KeySym.J,
         )
     if game.mode == MODE_SHOP:
-        return (
-            not game.shop_sell_mode
-            and sym in (
-                KeySym.UP,
-                KeySym.DOWN,
-                KeySym.W,
-                KeySym.S,
-                KeySym.K,
-                KeySym.J,
-            )
+        return sym in (
+            KeySym.UP,
+            KeySym.DOWN,
+            KeySym.W,
+            KeySym.S,
+            KeySym.K,
+            KeySym.J,
         )
     return False
 
@@ -658,29 +656,40 @@ def _handle_pause(game: Game, event: tcod.event.KeyDown) -> bool:
 def _handle_inventory(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
     if sym in (KeySym.ESCAPE, KeySym.TAB):
-        game.mode = MODE_PLAYING
+        if game.inventory_reorder:
+            game.inventory_reorder = False
+        else:
+            game.mode = MODE_PLAYING
         return False
     if sym in (KeySym.UP, KeySym.W, KeySym.K):
-        game.inventory_move(-1)
+        if game.inventory_reorder:
+            game.inventory_reorder_move(-1)
+        else:
+            game.inventory_move(-1)
         return False
     if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
-        game.inventory_move(1)
+        if game.inventory_reorder:
+            game.inventory_reorder_move(1)
+        else:
+            game.inventory_move(1)
         return False
     if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+        if game.inventory_reorder:
+            game.inventory_reorder = False
+            return False
         idx = game.inventory_selected()
         if idx is not None and game.use_inventory(idx):
             if game.mode == MODE_INVENTORY:
                 game.mode = MODE_PLAYING
         return False
-    letter = _letter(event)
-    if letter:
-        idx = game.inventory.letter_index(letter)
-        if idx is None:
-            game.msg("No item in that slot.")
-            return False
-        game.inventory_index = idx
-        if game.use_inventory(idx) and game.mode == MODE_INVENTORY:
-            game.mode = MODE_PLAYING
+    digit = _digit(event)
+    if digit is not None:
+        if digit == 0:
+            game.toggle_inventory_reorder()
+        elif not game.inventory_reorder:
+            if game.quick_use_inventory(digit) and game.mode == MODE_INVENTORY:
+                game.mode = MODE_PLAYING
+        return False
     return False
 
 
@@ -704,14 +713,6 @@ def _handle_trash(game: Game, event: tcod.event.KeyDown) -> bool:
             if idx is not None:
                 game.put_in_trash(idx)
             return False
-        letter = _letter(event)
-        if letter:
-            idx = game.inventory.letter_index(letter)
-            if idx is None:
-                game.msg("No item in that slot.")
-                return False
-            game.inventory_index = idx
-            game.put_in_trash(idx)
         return False
     if sym == KeySym.I:
         game.close_trash()
@@ -731,14 +732,6 @@ def _handle_trash(game: Game, event: tcod.event.KeyDown) -> bool:
         game.inventory_index = 0
         game.trash_deposit_mode = True
         return False
-    letter = _letter(event)
-    if letter:
-        idx = ord(letter) - ord("a")
-        if idx < len(game.trash_items):
-            game.container_index = idx
-            game.take_from_trash(idx)
-        else:
-            game.msg("No item in that slot.")
     return False
 
 
@@ -762,14 +755,6 @@ def _handle_chest(game: Game, event: tcod.event.KeyDown) -> bool:
             if idx is not None:
                 game.put_in_chest(idx)
             return False
-        letter = _letter(event)
-        if letter:
-            idx = game.inventory.letter_index(letter)
-            if idx is None:
-                game.msg("No item in that slot.")
-                return False
-            game.inventory_index = idx
-            game.put_in_chest(idx)
         return False
     if sym == KeySym.I:
         game.close_chest()
@@ -789,16 +774,16 @@ def _handle_chest(game: Game, event: tcod.event.KeyDown) -> bool:
         game.inventory_index = 0
         game.chest_deposit_mode = True
         return False
-    letter = _letter(event)
-    if letter:
-        chest = game.active_chest
-        idx = ord(letter) - ord("a")
-        if chest is not None and idx < len(chest.items):
-            game.container_index = idx
-            game.take_from_chest(idx)
-        else:
-            game.msg("No item in that slot.")
     return False
+
+
+def _window_pixels(
+    game: Game, columns: int, rows: int
+) -> tuple[int, int]:
+    """Размер окна в пикселях: auto заполняет монитор, пресеты — по клеткам."""
+    if game.display_mode == AUTO_DISPLAY_MODE:
+        return auto_window_size(columns, rows)
+    return columns * TILE_W, rows * TILE_H
 
 
 def _handle_shop(game: Game, event: tcod.event.KeyDown) -> bool:
@@ -807,13 +792,17 @@ def _handle_shop(game: Game, event: tcod.event.KeyDown) -> bool:
         if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
             game.shop_sell_mode = False
             return False
-        letter = _letter(event)
-        if letter:
-            idx = game.inventory.letter_index(letter)
-            if idx is None:
-                game.msg("No item in that slot.")
-                return False
-            game.shop_sell_item(idx)
+        if sym in (KeySym.UP, KeySym.W, KeySym.K):
+            game.shop_sell_move(-1)
+            return False
+        if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+            game.shop_sell_move(1)
+            return False
+        if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
+            idx = game.shop_sell_selected()
+            if idx is not None:
+                game.shop_sell_item(idx)
+            return False
         return False
     if sym in (KeySym.ESCAPE, KeySym.TAB, KeySym.I):
         game.close_shop()
@@ -830,17 +819,8 @@ def _handle_shop(game: Game, event: tcod.event.KeyDown) -> bool:
     if sym == KeySym.R:
         game.shop_repair_all()
         return False
-    letter = _letter(event)
-    if letter:
-        idx = ord(letter) - ord("a")
-        if idx < len(game.merchant_stock):
-            game.shop_index = idx
-            game.shop_buy(idx)
-        else:
-            game.msg("No item in that slot.")
-        return False
     if sym in (KeySym.DELETE, KeySym.BACKSPACE):
-        game.shop_sell_mode = True
+        game.open_shop_sell()
         return False
     return False
 
@@ -849,12 +829,13 @@ def main() -> None:
     use_display_mode = load_display_mode()
     game = Game(build_level=False, display_mode=use_display_mode)
     screen_w, screen_h = game.screen_width(), game.screen_height()
+    window_w, window_h = _window_pixels(game, screen_w, screen_h)
     tileset = load_tileset()
     with tcod.context.new(
         columns=screen_w,
         rows=screen_h,
-        width=screen_w * TILE_W,
-        height=screen_h * TILE_H,
+        width=window_w,
+        height=window_h,
         tileset=tileset,
         title="Castle of Shadows",
         vsync=True,
@@ -939,7 +920,7 @@ def main() -> None:
                 window = context.sdl_window
                 if window is not None:
                     try:
-                        window.size = (new_w * TILE_W, new_h * TILE_H)
+                        window.size = _window_pixels(game, new_w, new_h)
                     except Exception as exc:  # pragma: no cover
                         print(f"Could not resize window: {exc}")
                 needs_fit = True

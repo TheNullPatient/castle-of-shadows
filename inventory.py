@@ -84,13 +84,19 @@ class Inventory:
     def pop(self, index: int) -> Item:
         return self.remove(index)
 
-    def letter_index(self, char: str) -> int | None:
-        if len(char) != 1:
+    def move(self, index: int, delta: int) -> int | None:
+        """Переставить предмет на ``delta`` позиций и вернуть новый индекс."""
+        count = len(self.items)
+        if not (0 <= index < count):
             return None
-        idx = ord(char.lower()) - ord("a")
-        if 0 <= idx < len(self.items):
-            return idx
-        return None
+        target = index + delta
+        if not (0 <= target < count):
+            return index
+        self.items[index], self.items[target] = (
+            self.items[target],
+            self.items[index],
+        )
+        return target
 
     @staticmethod
     def item_label(item: Item) -> str:

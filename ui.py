@@ -10,6 +10,7 @@ from constants import (
     AIM_PATH_CHAR,
     AIM_TARGET_CHAR,
     ALTAR_CHAR,
+    AUTO_DISPLAY_MODE,
     CHEST_CAPACITY,
     CHEST_CHAR,
     BIOME_COLORS,
@@ -54,6 +55,7 @@ from constants import (
     HINT_Y,
     LOG_H,
     LOG_Y,
+    MAP_Y,
     MAX_DEPTH,
     MERCHANT_CHAR,
     MODE_AIM,
@@ -87,21 +89,19 @@ HELP_ROWS = [
     ("Search", "x: find traps / secret doors nearby"),
     ("Wait", ". or Space"),
     ("Pick up", "walk over an item (gold auto)"),
-    ("Inventory", "Tab: W/S + Enter, or a-z"),
+    ("Inventory", "Tab: W/S + Enter; 1-9 quick use; 0 reorder"),
+    ("Reorder", "0 then W/S move the item, Enter/Esc done"),
     ("Interact", "i: chest / trash / merchant / altar nearby"),
     ("Throw away", "trash: Del, W/S + Enter (one at a time)"),
     ("Trash", "stand next to '%' and press i"),
     ("Chests", "i near '=': W/S + Enter take, Del put"),
     ("Altar", "i near '_': heal, cure, or +1 max HP"),
-    ("Shop", "i near '&': buy, R repair, Del sell"),
+    ("Shop", "i near '&': W/S + Enter buy, Del sell"),
     ("Descend", "stand on '>' and press > or Enter"),
-    ("Map", "large floors; camera follows; '<' spawn"),
-    ("Map scroll", "use it, then reopen from inventory"),
+    ("Map", "large floors; camera follows; scroll from pack"),
     ("Log", "PgUp / PgDn, or - / ="),
     ("Help", "?"),
     ("Pause", "Esc: settings, save/quit, desktop options"),
-    ("Quick quit", "Q in pause: save & menu"),
-    ("Saves", "5 slots; Continue in the menu"),
     ("Restart", "R (on the death screen)"),
     ("Health", "no passive regen; potions/floors heal"),
     ("Potions", "heal more on deeper floors"),
@@ -242,7 +242,7 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                 else:
                     fg = _tint(floor_color, 0.20)
                 bg = COLOR_BG
-            _put(console, sx, sy, ch, fg, bg)
+            _put(console, sx, MAP_Y + sy, ch, fg, bg)
 
 
 def _render_full_map(console: tcod.console.Console, game: Game) -> None:
@@ -351,7 +351,7 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
     )
     hint = "WASD/arrows scroll · PgUp/PgDn · Home center · Tab/Esc/i close"
     console.print(
-        1,
+        max(1, (screen_w - len(hint)) // 2),
         screen_h - 2,
         hint[: screen_w - 2],
         fg=COLOR_DIM,
@@ -362,6 +362,10 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
 def _render_entities(console: tcod.console.Console, game: Game) -> None:
     left, top = game.camera()
     view_w, view_h = game.view_width(), game.view_height()
+
+    def put(sx: int, sy: int, ch: str, fg) -> None:
+        _put(console, sx, MAP_Y + sy, ch, fg)
+
     spawn = getattr(game, "spawn", None)
     if spawn is not None and game.is_explored(spawn[0], spawn[1]):
         sx, sy = spawn[0] - left, spawn[1] - top
@@ -371,15 +375,14 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
                 if game.is_visible(spawn[0], spawn[1])
                 else _tint(COLOR_SPAWN, 0.55)
             )
-            _put(console, sx, sy, "<", color)
+            put(sx, sy, "<", color)
     for chest in game.chests:
         if game.is_visible(chest.x, chest.y):
             color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
-            _put(console, chest.x - left, chest.y - top, CHEST_CHAR, color)
+            put(chest.x - left, chest.y - top, CHEST_CHAR, color)
     merchant = game.merchant_pos
     if merchant is not None and game.is_visible(merchant[0], merchant[1]):
-        _put(
-            console,
+        put(
             merchant[0] - left,
             merchant[1] - top,
             MERCHANT_CHAR,
@@ -388,16 +391,10 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
     altar = game.altar_pos
     if altar is not None and game.is_visible(altar[0], altar[1]):
         color = COLOR_ALTAR if not game.altar_used else COLOR_DIM
-        _put(
-            console,
-            altar[0] - left,
-            altar[1] - top,
-            ALTAR_CHAR,
-            color,
-        )
+        put(altar[0] - left, altar[1] - top, ALTAR_CHAR, color)
     for item in game.items:
         if game.is_visible(item.x, item.y):
-            _put(console, item.x - left, item.y - top, item.char, item.color)
+            put(item.x - left, item.y - top, item.char, item.color)
     for trap in game.traps:
         if not trap.revealed or not game.is_explored(trap.x, trap.y):
             continue
@@ -405,21 +402,15 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
             color = COLOR_TRAP if trap.armed else COLOR_TRAP_SPENT
         else:
             color = _tint(COLOR_TRAP_SPENT, 0.55)
-        _put(
-            console,
-            trap.x - left,
-            trap.y - top,
-            TRAP_CHAR,
-            color,
-        )
+        put(trap.x - left, trap.y - top, TRAP_CHAR, color)
     for enemy in game.enemies:
         if not game.is_visible(enemy.x, enemy.y):
             continue
         ratio = max(0.2, enemy.hp / enemy.max_hp)
         color = _tint(enemy.color, 0.62 + ratio * 0.38)
-        _put(console, enemy.x - left, enemy.y - top, enemy.char, color)
+        put(enemy.x - left, enemy.y - top, enemy.char, color)
     player = game.player
-    _put(console, player.x - left, player.y - top, "@", COLOR_PLAYER)
+    put(player.x - left, player.y - top, "@", COLOR_PLAYER)
 
 
 def _print_segments(
@@ -561,7 +552,9 @@ def _render_hint(console: tcod.console.Console, game: Game) -> None:
         ("?", COLOR_UI),
         (" help", COLOR_DIM),
     ]
-    _print_segments(console, 0, HINT_Y, segments, COLOR_PANEL)
+    width = sum(len(text) for text, _ in segments)
+    x = max(0, (console.width - width) // 2)
+    _print_segments(console, x, HINT_Y, segments, COLOR_PANEL)
 
 
 def _render_aim(console: tcod.console.Console, game: Game) -> None:
@@ -575,9 +568,9 @@ def _render_aim(console: tcod.console.Console, game: Game) -> None:
         if not (0 <= sx < view_w and 0 <= sy < view_h):
             continue
         if target is not None and (target.x, target.y) == (x, y):
-            _put(console, sx, sy, AIM_TARGET_CHAR, COLOR_AIM_TARGET)
+            _put(console, sx, MAP_Y + sy, AIM_TARGET_CHAR, COLOR_AIM_TARGET)
         else:
-            _put(console, sx, sy, AIM_PATH_CHAR, COLOR_AIM)
+            _put(console, sx, MAP_Y + sy, AIM_PATH_CHAR, COLOR_AIM)
     console.draw_rect(
         0, HINT_Y, console.width, 1, ord(" "), fg=COLOR_UI, bg=COLOR_PANEL
     )
@@ -592,7 +585,7 @@ def _render_aim(console: tcod.console.Console, game: Game) -> None:
         " · Enter shoot · Esc cancel"
     )
     console.print(
-        0,
+        max(0, (console.width - len(hint)) // 2),
         HINT_Y,
         hint[: console.width],
         fg=COLOR_AIM,
@@ -608,14 +601,19 @@ def _render_inventory(
 ) -> None:
     inventory = game.inventory
     width = min(game.screen_width(), console.width)
-    height = min(game.view_height(), console.height)
+    height = min(game.view_height(), console.height - MAP_Y)
     x0 = 0
-    y0 = 0
+    y0 = MAP_Y
     frame_title = (
         title
         if title is not None
         else f" Inventory {len(inventory.items)}/{inventory.capacity} "
     )
+    if title is None and game.inventory_reorder:
+        frame_title = (
+            f" Inventory {len(inventory.items)}/{inventory.capacity}"
+            " · reorder "
+        )
     console.draw_frame(
         x0,
         y0,
@@ -671,15 +669,15 @@ def _render_inventory(
             row = i % rows_per_column
             if column >= columns:
                 break
-            letter = chr(ord("a") + i)
+            slot = str(i + 1) if i < 9 else "·"
             equipped = item is inventory.weapon or item is inventory.armor
             marker = "*" if equipped else " "
-            line = f"{letter}){marker}{inventory.label(item)}"
+            line = f"{slot}){marker}{inventory.label(item)}"[:column_width]
             chosen = i == selected
             fg = COLOR_GOLD if chosen or equipped else item.color
             bg = COLOR_PANEL_LIGHT if chosen else COLOR_PANEL
             if chosen:
-                line = line[:column_width].ljust(column_width)
+                line = line.ljust(column_width)
             console.print(
                 x0 + 2 + column * stride,
                 y0 + 5 + row,
@@ -688,9 +686,12 @@ def _render_inventory(
                 bg=bg,
             )
 
-    hint_text = (
-        hint if hint is not None else "W/S move · Enter use · a-z · Esc close"
+    default_hint = (
+        "W/S move · Enter use · 1-9 quick · 0 reorder · Esc close"
     )
+    if game.inventory_reorder:
+        default_hint = "Reorder · W/S move item · Enter/Esc done"
+    hint_text = hint if hint is not None else default_hint
     console.print(
         x0 + 2,
         y0 + height - 2,
@@ -703,10 +704,9 @@ def _render_inventory(
 def _container_lines(game: Game, items: list) -> list[tuple[str, tuple]]:
     """Строки меню мусорки/сундука с полными названиями предметов."""
     lines = []
-    for i, item in enumerate(items):
-        letter = chr(ord("a") + i)
+    for item in items:
         fg = COLOR_GOLD if item.kind == "gold" else item.color
-        lines.append((f" {letter}) {game.inventory.label(item)}", fg))
+        lines.append((f"  {game.inventory.label(item)}", fg))
     return lines
 
 
@@ -738,7 +738,7 @@ def _render_trash(console: tcod.console.Console, game: Game) -> None:
     width = _container_width(lines, game.screen_width())
     height = min(view_h, TRASH_CAPACITY + 5)
     x0 = max(1, (view_w - width) // 2)
-    y0 = max(1, (view_h - height) // 2)
+    y0 = MAP_Y + max(0, (view_h - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -792,7 +792,7 @@ def _render_chest(console: tcod.console.Console, game: Game) -> None:
     width = _container_width(lines, game.screen_width())
     height = min(view_h, max(7, len(chest.items) + 5))
     x0 = max(1, (view_w - width) // 2)
-    y0 = max(1, (view_h - height) // 2)
+    y0 = MAP_Y + max(0, (view_h - height) // 2)
     frame_color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
     console.draw_frame(
         x0,
@@ -842,8 +842,7 @@ def _render_shop(console: tcod.console.Console, game: Game) -> None:
         marker = ">" if i == game.shop_index else " "
         rows.append(
             (
-                f"{marker} {chr(ord('a') + i)}) {inventory.label(item)}  "
-                f"{price}g",
+                f"{marker} {inventory.label(item)}  {price}g",
                 item.color,
                 price,
             )
@@ -862,7 +861,7 @@ def _render_shop(console: tcod.console.Console, game: Game) -> None:
     width = min(view_w, max(54, longest + 4))
     height = min(view_h, max(10, len(stock) + 8))
     x0 = max(1, (view_w - width) // 2)
-    y0 = max(1, (view_h - height) // 2)
+    y0 = MAP_Y + max(0, (view_h - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -887,12 +886,13 @@ def _render_shop(console: tcod.console.Console, game: Game) -> None:
         )
     for i, (line, color, price) in enumerate(rows):
         fg = color if price <= game.gold else COLOR_DIM
+        chosen = i == game.shop_index
         console.print(
             x0 + 2,
             y0 + 4 + i,
             line[: width - 4],
-            fg=fg,
-            bg=COLOR_PANEL,
+            fg=COLOR_GOLD if chosen else fg,
+            bg=COLOR_PANEL_LIGHT if chosen else COLOR_PANEL,
         )
     repair = game.shop_repair_cost()
     repair_line = (
@@ -910,7 +910,9 @@ def _render_shop(console: tcod.console.Console, game: Game) -> None:
     console.print(
         x0 + 2,
         y0 + height - 2,
-        "Enter/a-z buy   Del sell   Esc close"[: width - 4],
+        "W/S select · Enter buy · R repair · Del sell · Esc close"[
+            : width - 4
+        ],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
@@ -919,17 +921,14 @@ def _render_shop(console: tcod.console.Console, game: Game) -> None:
 def _render_shop_sell(console: tcod.console.Console, game: Game) -> None:
     inventory = game.inventory
     lines = []
-    for i, item in enumerate(inventory.items):
+    for item in inventory.items:
         price = game.shop_sell_price(item)
-        code = chr(ord("a") + i)
-        lines.append(
-            (f" {code}) {inventory.label(item)}  {price}g", item.color)
-        )
+        lines.append((f"  {inventory.label(item)}  {price}g", item.color))
     width = _container_width(lines, game.screen_width())
     view_w, view_h = game.view_width(), game.view_height()
     height = min(view_h, max(7, len(lines) + 5))
     x0 = max(1, (view_w - width) // 2)
-    y0 = max(1, (view_h - height) // 2)
+    y0 = MAP_Y + max(0, (view_h - height) // 2)
     console.draw_frame(
         x0,
         y0,
@@ -944,18 +943,20 @@ def _render_shop_sell(console: tcod.console.Console, game: Game) -> None:
         console.print(
             x0 + 2, y0 + 2, "(empty)", fg=COLOR_DIM, bg=COLOR_PANEL
         )
+    selected = game.shop_sell_selected()
     for i, (line, color) in enumerate(lines):
+        chosen = i == selected
         console.print(
             x0 + 2,
             y0 + 2 + i,
             line[: width - 4],
-            fg=color,
-            bg=COLOR_PANEL,
+            fg=COLOR_GOLD if chosen else color,
+            bg=COLOR_PANEL_LIGHT if chosen else COLOR_PANEL,
         )
     console.print(
         x0 + 2,
         y0 + height - 2,
-        "a-z sell one   ESC done"[: width - 4],
+        "W/S select · Enter sell one · Esc done"[: width - 4],
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
@@ -1137,8 +1138,9 @@ def _render_settings(console: tcod.console.Console, game: Game) -> None:
         info = DISPLAY_MODES[mode]
         marker = ">" if selected else " "
         current = " *" if mode == game.display_mode else ""
+        cols = game.auto_width if mode == AUTO_DISPLAY_MODE else info["width"]
         text = (
-            f"{marker} {info['label']:<14} {info['width']:>3} cols"
+            f"{marker} {info['label']:<14} {cols:>3} cols"
             f"  {info['note']}{current}"
         )
         console.print(
@@ -1178,7 +1180,7 @@ def _render_pause(console: tcod.console.Console, game: Game) -> None:
     width = min(view_w - 4, 58)
     height = len(game.pause_options()) * 2 + 6
     x0 = max(1, (view_w - width) // 2)
-    y0 = max(1, (view_h - height) // 2)
+    y0 = MAP_Y + max(0, (view_h - height) // 2)
     console.draw_frame(
         x0,
         y0,

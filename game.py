@@ -12,6 +12,7 @@ from constants import (
     AGGRO_RANGE,
     ALTAR_HEAL_RATIO,
     ARMOR_WEAR_PER_HIT,
+    AUTO_DISPLAY_MODE,
     BIOME_NAMES,
     biome_index,
     BOSS_HEAL_MIN,
@@ -94,6 +95,7 @@ from constants import (
     VIEW_H,
     VIEW_W,
 )
+from display import auto_columns
 from dungeon import Dungeon
 from entities import (
     BOSS_TYPES,
@@ -201,6 +203,7 @@ class Game:
         build_level: bool = True,
         run_mode: str = RUN_MODE_GENERAL,
         display_mode: str | None = None,
+        auto_width: int | None = None,
     ) -> None:
         self.mode = MODE_MENU
         self.menu_index = 0
@@ -213,6 +216,12 @@ class Game:
         if display_mode not in DISPLAY_MODES:
             display_mode = DEFAULT_DISPLAY_MODE
         self.display_mode = display_mode
+        if auto_width and auto_width > 0:
+            self.auto_width = auto_width
+        elif display_mode == AUTO_DISPLAY_MODE:
+            self.auto_width = auto_columns()
+        else:
+            self.auto_width = int(DISPLAY_MODES[AUTO_DISPLAY_MODE]["width"])
         self.display_changed = False
         self.settings_index = DISPLAY_MODE_ORDER.index(display_mode)
         self.settings_return_mode = MODE_MENU
@@ -253,12 +262,14 @@ class Game:
         self.chest_deposit_mode = False
         self.chest_hinted = False
         self.inventory_index = 0
+        self.inventory_reorder = False
         self.container_index = 0
         self.merchant_pos: tuple[int, int] | None = None
         self.merchant_stock: list[Item] = []
         self.merchant_noticed = False
         self.shop_index = 0
         self.shop_sell_mode = False
+        self.shop_sell_index = 0
         self.aim_dx = 1
         self.aim_dy = 0
         self.traps: list[Trap] = []
@@ -336,6 +347,8 @@ class Game:
     # --- Отображение и настройки -----------------------------------------
     def screen_width(self) -> int:
         """Ширина всей консоли в клетках для выбранного режима."""
+        if self.display_mode == AUTO_DISPLAY_MODE:
+            return max(VIEW_W, int(self.auto_width))
         info = DISPLAY_MODES.get(self.display_mode)
         if info is None:
             return SCREEN_W
@@ -357,7 +370,14 @@ class Game:
     def map_view_height(self) -> int:
         return max(1, self.screen_height() - 4)
 
+    def refresh_auto_width(self) -> int:
+        """Пересчитать ширину auto под текущий монитор."""
+        self.auto_width = auto_columns()
+        return self.auto_width
+
     def display_label(self) -> str:
+        if self.display_mode == AUTO_DISPLAY_MODE:
+            return f"Auto · {self.screen_width()} cols"
         info = DISPLAY_MODES.get(self.display_mode)
         return info["label"] if info else self.display_mode
 
@@ -385,13 +405,23 @@ class Game:
         return self.display_mode_at(self.settings_index)
 
     def apply_display_selection(self) -> bool:
-        return self.set_display_mode(self.selected_display_mode())
+        mode = self.selected_display_mode()
+        if mode == self.display_mode == AUTO_DISPLAY_MODE:
+            previous = self.auto_width
+            self.refresh_auto_width()
+            if self.auto_width != previous:
+                self.display_changed = True
+                return True
+            return False
+        return self.set_display_mode(mode)
 
     def set_display_mode(self, mode: str) -> bool:
         """Сменить режим отображения; main.py пересоздаст окно и консоль."""
         if mode not in DISPLAY_MODES or mode == self.display_mode:
             return False
         self.display_mode = mode
+        if mode == AUTO_DISPLAY_MODE:
+            self.refresh_auto_width()
         self.settings_index = DISPLAY_MODE_ORDER.index(mode)
         self.display_changed = True
         return True
@@ -601,12 +631,14 @@ class Game:
         self.chest_deposit_mode = False
         self.chest_hinted = False
         self.inventory_index = 0
+        self.inventory_reorder = False
         self.container_index = 0
         self.merchant_pos = None
         self.merchant_stock = []
         self.merchant_noticed = False
         self.shop_index = 0
         self.shop_sell_mode = False
+        self.shop_sell_index = 0
         self.aim_dx = 1
         self.aim_dy = 0
         self.traps = []
@@ -1168,6 +1200,7 @@ class Game:
         self.active_chest = chest
         self.chest_deposit_mode = False
         self.inventory_index = 0
+        self.inventory_reorder = False
         self.container_index = 0
         if not chest.opened:
             chest.opened = True
@@ -1319,6 +1352,7 @@ class Game:
         self.mode = MODE_SHOP
         self.shop_index = 0
         self.shop_sell_mode = False
+        self.shop_sell_index = 0
         self.msg("The merchant spreads out his wares.", "good")
 
     def close_shop(self) -> None:
@@ -1330,6 +1364,26 @@ class Game:
         count = len(self.merchant_stock)
         if count:
             self.shop_index = (self.shop_index + delta) % count
+
+    def open_shop_sell(self) -> None:
+        """Включить продажу: курсор ходит по рюкзаку."""
+        self.shop_sell_mode = True
+        self.shop_sell_index = 0
+        self.shop_sell_selected()
+
+    def shop_sell_move(self, delta: int) -> None:
+        count = len(self.inventory.items)
+        if count:
+            self.shop_sell_index = (self.shop_sell_index + delta) % count
+
+    def shop_sell_selected(self) -> int | None:
+        """Индекс выбранного для продажи предмета или None."""
+        count = len(self.inventory.items)
+        if count <= 0:
+            self.shop_sell_index = 0
+            return None
+        self.shop_sell_index = min(max(0, self.shop_sell_index), count - 1)
+        return self.shop_sell_index
 
     def item_price(self, item: Item) -> int:
         return shop_price(item, self.depth)
@@ -1427,6 +1481,7 @@ class Game:
             self.inventory.remove(index)
         self.gold += price
         self.msg(f"You sell {name} for {price} gold.", "gold")
+        self.shop_sell_selected()
         return True
 
     def interact(self) -> bool:
@@ -2194,6 +2249,7 @@ class Game:
             return
         self.trash_deposit_mode = False
         self.inventory_index = 0
+        self.inventory_reorder = False
         self.container_index = 0
         self.mode = MODE_TRASH
 
@@ -2489,9 +2545,37 @@ class Game:
     def toggle_inventory(self) -> None:
         if self.mode == MODE_INVENTORY:
             self.mode = MODE_PLAYING
+            self.inventory_reorder = False
         elif self.mode == MODE_PLAYING:
             self.inventory_index = 0
+            self.inventory_reorder = False
             self.mode = MODE_INVENTORY
+
+    def toggle_inventory_reorder(self) -> None:
+        """Включить/выключить режим перестановки предметов."""
+        self.inventory_reorder = not self.inventory_reorder
+
+    def inventory_reorder_move(self, delta: int) -> None:
+        """Переместить выбранный предмет вверх или вниз по рюкзаку."""
+        if not self.inventory_reorder:
+            return
+        index = self.inventory_selected()
+        if index is None:
+            return
+        moved = self.inventory.move(index, delta)
+        if moved is not None:
+            self.inventory_index = moved
+
+    def quick_use_inventory(self, slot: int) -> bool:
+        """Быстрый доступ к первым девяти предметам по цифрам 1-9."""
+        if not (1 <= slot <= 9):
+            return False
+        index = slot - 1
+        if index >= len(self.inventory.items):
+            self.msg(f"No item in quick slot {slot}.")
+            return False
+        self.inventory_index = index
+        return self.use_inventory(index)
 
     def inventory_move(self, delta: int) -> None:
         """Передвинуть курсор по рюкзаку с закольцовыванием."""
