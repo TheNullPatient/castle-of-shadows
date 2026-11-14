@@ -375,6 +375,20 @@ class Game:
         self.auto_width = auto_columns()
         return self.auto_width
 
+    def set_auto_width(self, columns: int) -> bool:
+        """Подогнать ширину auto под фактический размер окна."""
+        if self.display_mode != AUTO_DISPLAY_MODE:
+            return False
+        columns = max(VIEW_W, int(columns))
+        if columns == self.auto_width:
+            return False
+        self.auto_width = columns
+        if self.player is not None:
+            self.map_left, self.map_top = self._clamp_map(
+                self.map_left, self.map_top
+            )
+        return True
+
     def display_label(self) -> str:
         if self.display_mode == AUTO_DISPLAY_MODE:
             return f"Auto · {self.screen_width()} cols"
@@ -407,12 +421,9 @@ class Game:
     def apply_display_selection(self) -> bool:
         mode = self.selected_display_mode()
         if mode == self.display_mode == AUTO_DISPLAY_MODE:
-            previous = self.auto_width
             self.refresh_auto_width()
-            if self.auto_width != previous:
-                self.display_changed = True
-                return True
-            return False
+            self.display_changed = True
+            return True
         return self.set_display_mode(mode)
 
     def set_display_mode(self, mode: str) -> bool:

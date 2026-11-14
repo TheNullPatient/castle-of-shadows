@@ -13,7 +13,7 @@ from constants import SCREEN_H, TILE_H, TILE_W, VIEW_W
 
 SDL_INIT_VIDEO = 0x20
 MIN_AUTO_WIDTH = VIEW_W
-MAX_AUTO_WIDTH = 160
+MAX_AUTO_WIDTH = 320
 FALLBACK_AUTO_WIDTH = 98
 
 # Доля рабочего стола, которую должно занимать окно по высоте и ширине.
@@ -89,3 +89,24 @@ def auto_window_size(
     return max(1, int(columns * TILE_W * scale)), max(
         1, int(rows * TILE_H * scale)
     )
+
+
+def columns_for_window(
+    window_width: int,
+    window_height: int,
+    rows: int = SCREEN_H,
+) -> int:
+    """Столбцы консоли под текущее соотношение сторон окна.
+
+    В ``auto`` высота консоли фиксирована, а ширина подбирается так, чтобы
+    клетки сохраняли пропорции 12×20 при любом размере окна. Это позволяет
+    заполнить окно целиком, не растягивая шрифт по одной оси.
+    """
+    rows = max(1, int(rows))
+    if window_width <= 0 or window_height <= 0:
+        return MIN_AUTO_WIDTH
+    scale = window_height / (rows * TILE_H)
+    if scale <= 0:
+        return MIN_AUTO_WIDTH
+    columns = round(window_width / (TILE_W * scale))
+    return max(MIN_AUTO_WIDTH, min(MAX_AUTO_WIDTH, columns))

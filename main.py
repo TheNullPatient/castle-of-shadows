@@ -34,7 +34,7 @@ from constants import (
     TTF_PATH,
     TILESET_PATH,
 )
-from display import auto_window_size
+from display import auto_window_size, columns_for_window
 from game import Game
 from settings import load_display_mode, save_display_mode
 from ui import render
@@ -786,6 +786,22 @@ def _window_pixels(
     return columns * TILE_W, rows * TILE_H
 
 
+def _sync_auto_console(
+    context: tcod.context.Context,
+    game: Game,
+    console: tcod.console.Console,
+) -> tcod.console.Console:
+    """Пересчитать ширину консоли под фактическое окно в режиме auto."""
+    if game.display_mode != AUTO_DISPLAY_MODE:
+        return console
+    out_w, out_h = _output_size(context, console.width, console.height)
+    columns = columns_for_window(out_w, out_h, console.height)
+    if columns == console.width:
+        return console
+    game.set_auto_width(columns)
+    return tcod.console.Console(columns, console.height, order="F")
+
+
 def _handle_shop(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
     if game.shop_sell_mode:
@@ -845,6 +861,7 @@ def main() -> None:
         ),
     ) as context:
         console = tcod.console.Console(screen_w, screen_h, order="F")
+        console = _sync_auto_console(context, game, console)
         needs_fit = True
         settling = False
         repeat = KeyRepeat()
@@ -868,10 +885,12 @@ def main() -> None:
                 needs_fit = False
 
             render(console, game)
-            # keep_aspect убирает искажения, а integer_scaling=False позволяет
-            # заполнить окно дробно — поля остаются только по бокам.
+            # В auto консоль подстраивается под окно, поэтому её можно
+            # растянуть на всю площадь. Пресеты сохраняют свои пропорции.
             context.present(
-                console, keep_aspect=True, integer_scaling=False
+                console,
+                keep_aspect=game.display_mode != AUTO_DISPLAY_MODE,
+                integer_scaling=False,
             )
 
             now = time.monotonic()
@@ -909,6 +928,7 @@ def main() -> None:
                     repeat.release(event.sym, now)
             if settling and not resized:
                 settling = False
+                console = _sync_auto_console(context, game, console)
                 needs_fit = True
 
             if game.display_changed:
