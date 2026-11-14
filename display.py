@@ -110,3 +110,12 @@ def columns_for_window(
         return MIN_AUTO_WIDTH
     columns = round(window_width / (TILE_W * scale))
     return max(MIN_AUTO_WIDTH, min(MAX_AUTO_WIDTH, columns))
+
+
+def minimum_window_size(
+    columns: int, rows: int = SCREEN_H
+) -> tuple[int, int]:
+    """Минимальный размер окна, при котором клетки остаются 12×20."""
+    columns = max(1, int(columns))
+    rows = max(1, int(rows))
+    return columns * TILE_W, rows * TILE_H

@@ -34,7 +34,12 @@ from constants import (
     TTF_PATH,
     TILESET_PATH,
 )
-from display import auto_window_size, columns_for_window
+from display import (
+    MIN_AUTO_WIDTH,
+    auto_window_size,
+    columns_for_window,
+    minimum_window_size,
+)
 from game import Game
 from settings import load_display_mode, save_display_mode
 from ui import render
@@ -802,6 +807,52 @@ def _sync_auto_console(
     return tcod.console.Console(columns, console.height, order="F")
 
 
+def _minimum_window_pixels(game: Game, rows: int) -> tuple[int, int]:
+    """Минимум окна: для auto — базовые 70 колонок, для пресета — его ширина."""
+    columns = (
+        MIN_AUTO_WIDTH
+        if game.display_mode == AUTO_DISPLAY_MODE
+        else game.screen_width()
+    )
+    return minimum_window_size(columns, rows)
+
+
+def _apply_window_minimum(
+    context: tcod.context.Context,
+    game: Game,
+    rows: int,
+) -> None:
+    """Не дать сжать окно так, чтобы интерфейс начал сплющиваться."""
+    window = context.sdl_window
+    if window is None:
+        return
+    min_w, min_h = _minimum_window_pixels(game, rows)
+    window.min_size = (min_w, min_h)
+    width, height = window.size
+    if width < min_w or height < min_h:
+        window.size = (max(width, min_w), max(height, min_h))
+
+
+def _enforce_auto_aspect(
+    context: tcod.context.Context,
+    game: Game,
+    rows: int,
+) -> bool:
+    """В auto не позволять окну стать уже, чем минимум в 70 колонок."""
+    if game.display_mode != AUTO_DISPLAY_MODE:
+        return False
+    window = context.sdl_window
+    if window is None:
+        return False
+    base_w, base_h = _minimum_window_pixels(game, rows)
+    width, height = window.size
+    required_w = round(height * base_w / base_h)
+    if width < required_w:
+        window.size = (required_w, height)
+        return True
+    return False
+
+
 def _handle_shop(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
     if game.shop_sell_mode:
@@ -861,6 +912,11 @@ def main() -> None:
         ),
     ) as context:
         console = tcod.console.Console(screen_w, screen_h, order="F")
+        try:
+            _apply_window_minimum(context, game, screen_h)
+            _enforce_auto_aspect(context, game, screen_h)
+        except Exception as exc:  # pragma: no cover - зависит от платформы
+            print(f"Could not set minimum window size: {exc}")
         console = _sync_auto_console(context, game, console)
         needs_fit = True
         settling = False
@@ -928,6 +984,10 @@ def main() -> None:
                     repeat.release(event.sym, now)
             if settling and not resized:
                 settling = False
+                try:
+                    _enforce_auto_aspect(context, game, console.height)
+                except Exception as exc:  # pragma: no cover
+                    print(f"Could not fit window aspect: {exc}")
                 console = _sync_auto_console(context, game, console)
                 needs_fit = True
 
@@ -940,7 +1000,9 @@ def main() -> None:
                 window = context.sdl_window
                 if window is not None:
                     try:
+                        _apply_window_minimum(context, game, new_h)
                         window.size = _window_pixels(game, new_w, new_h)
+                        _enforce_auto_aspect(context, game, new_h)
                     except Exception as exc:  # pragma: no cover
                         print(f"Could not resize window: {exc}")
                 needs_fit = True
