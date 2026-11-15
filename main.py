@@ -19,11 +19,13 @@ from constants import (
     LOG_H,
     MODE_AIM,
     MODE_CHEST,
+    MODE_DEAD,
     MODE_INVENTORY,
     MODE_MAP,
     MODE_MENU,
     MODE_PAUSE,
     MODE_PLAYING,
+    MODE_RECORDS,
     MODE_RUN_MODES,
     MODE_SETTINGS,
     MODE_SHOP,
@@ -335,8 +337,38 @@ def _dispatch_key(
     return result
 
 
+def handle_text(game: Game, text: str) -> None:
+    """Ввести текст из SDL TextInput (используется для seed)."""
+    if game.mode == MODE_SLOTS and game.seed_editing and text:
+        game.append_seed_text(text)
+
+
+def _sync_text_input(
+    context: tcod.context.Context,
+    game: Game,
+    active: bool,
+) -> bool:
+    """Включать SDL text input только пока игрок вводит seed."""
+    wanted = game.mode == MODE_SLOTS and game.seed_editing
+    if wanted == active:
+        return active
+    window = context.sdl_window
+    if window is None:
+        return wanted
+    try:
+        if wanted:
+            window.start_text_input()
+        else:
+            window.stop_text_input()
+    except Exception as exc:  # pragma: no cover - зависит от платформы
+        print(f"Could not toggle text input: {exc}")
+    return wanted
+
+
 def _repeatable_action(game: Game, sym: KeySym) -> bool:
     """Разрешён ли автоповтор этой клавиши в текущем режиме."""
+    if getattr(game, "seed_editing", False):
+        return False
     if sym not in REPEATABLE_KEYS:
         return False
     if game.mode == MODE_AIM:
@@ -352,6 +384,7 @@ def _repeatable_action(game: Game, sym: KeySym) -> bool:
         MODE_MENU,
         MODE_SLOTS,
         MODE_PAUSE,
+        MODE_RECORDS,
         MODE_RUN_MODES,
     ):
         return sym in (
@@ -410,21 +443,30 @@ def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
         return _handle_slots(game, event)
     if game.mode == MODE_RUN_MODES:
         return _handle_run_modes(game, event)
+    if game.mode == MODE_RECORDS:
+        return _handle_records(game, event)
     if game.mode == MODE_SETTINGS:
         return _handle_settings(game, event)
     if game.mode == MODE_MAP:
         return _handle_map(game, event)
     if game.mode == MODE_PAUSE:
         return _handle_pause(game, event)
-    if game.mode == "dead":
+    if game.mode == MODE_DEAD:
         if event.sym == KeySym.R:
             game.restart()
             return False
-        if event.sym == KeySym.ESCAPE:
+        if event.sym in (
+            KeySym.ESCAPE,
+            KeySym.RETURN,
+            KeySym.KP_ENTER,
+            KeySym.SPACE,
+        ):
             game.mode = MODE_MENU
             game.menu_index = 0
             return False
-        return True
+        if event.sym == KeySym.Q:
+            return True
+        return False
     if game.mode == "help":
         game.close_help()
         return False
@@ -550,6 +592,8 @@ def _handle_menu(game: Game, event: tcod.event.KeyDown) -> bool:
             game.open_run_modes()
         elif choice == "How to Play":
             game.toggle_help()
+        elif choice == "Records":
+            game.open_records()
         elif choice == "Settings":
             game.open_settings(MODE_MENU)
         else:
@@ -573,6 +617,26 @@ def _handle_run_modes(game: Game, event: tcod.event.KeyDown) -> bool:
         return False
     if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
         game.run_mode_activate()
+        return False
+    return False
+
+
+def _handle_records(game: Game, event: tcod.event.KeyDown) -> bool:
+    sym = event.sym
+    if sym in (KeySym.ESCAPE, KeySym.Q):
+        game.close_records()
+        return False
+    if sym in (KeySym.UP, KeySym.W, KeySym.K):
+        game.scroll_records(-1)
+        return False
+    if sym in (KeySym.DOWN, KeySym.S, KeySym.J):
+        game.scroll_records(1)
+        return False
+    if sym == KeySym.PAGEUP:
+        game.scroll_records(-game.records_visible_rows())
+        return False
+    if sym == KeySym.PAGEDOWN:
+        game.scroll_records(game.records_visible_rows())
         return False
     return False
 
@@ -604,6 +668,17 @@ def _handle_settings(game: Game, event: tcod.event.KeyDown) -> bool:
 
 def _handle_slots(game: Game, event: tcod.event.KeyDown) -> bool:
     sym = event.sym
+    if game.seed_editing:
+        if sym == KeySym.ESCAPE:
+            game.cancel_seed_edit()
+            return False
+        if sym in (KeySym.RETURN, KeySym.KP_ENTER):
+            game.commit_seed_edit()
+            return False
+        if sym == KeySym.BACKSPACE:
+            game.backspace_seed()
+            return False
+        return False
     if sym in (KeySym.ESCAPE, KeySym.Q):
         game.close_slots()
         return False
@@ -619,6 +694,13 @@ def _handle_slots(game: Game, event: tcod.event.KeyDown) -> bool:
     if sym in (KeySym.DELETE, KeySym.BACKSPACE):
         game.slot_delete()
         return False
+    if game.slot_action == "new":
+        if sym == KeySym.E:
+            game.begin_seed_edit()
+            return False
+        if sym == KeySym.R:
+            game.reroll_seed()
+            return False
     return False
 
 
@@ -920,6 +1002,7 @@ def main() -> None:
         console = _sync_auto_console(context, game, console)
         needs_fit = True
         settling = False
+        text_input = False
         repeat = KeyRepeat()
 
         while True:
@@ -982,6 +1065,9 @@ def main() -> None:
                         raise SystemExit()
                 elif isinstance(event, tcod.event.KeyUp):
                     repeat.release(event.sym, now)
+                elif isinstance(event, tcod.event.TextInput):
+                    handle_text(game, event.text)
+            text_input = _sync_text_input(context, game, text_input)
             if settling and not resized:
                 settling = False
                 try:

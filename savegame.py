@@ -21,6 +21,7 @@ from constants import (
 )
 from dungeon import Dungeon
 from entities import Chest, Entity, Item, Trap
+from records import generate_seed, normalize_seed
 
 SAVE_DIR = ROOT / "saves"
 SAVE_VERSION = 1
@@ -105,6 +106,7 @@ def slot_info(slot: int) -> dict[str, Any] | None:
     return {
         "slot": slot,
         "run_mode": _run_mode(state.get("run_mode")),
+        "seed": normalize_seed(state.get("seed")),
         "depth": int(state.get("depth", 1)),
         "turns": int(stats.get("turns", 0)),
         "player_level": int(stats.get("player_level", 1)),
@@ -313,12 +315,27 @@ def _equipment_index(items: list[Item], target: Item | None) -> int:
     return -1
 
 
+def _elapsed_time(game: Any) -> float:
+    """Сыгранное время: накопленное плюс текущая сессия.
+
+    Пауза между выходами и загрузкой не считается, поэтому в рекордах
+    остаётся чистое время забега.
+    """
+    accumulated = float(getattr(game, "elapsed_time", 0.0))
+    started = float(getattr(game, "session_started_at", 0.0))
+    if started <= 0:
+        return max(0.0, accumulated)
+    return max(0.0, accumulated + time.time() - started)
+
+
 def build_state(game: Any) -> dict[str, Any]:
     """Собрать сериализуемое состояние текущего забега."""
     inventory = game.inventory
     w, h = game.dungeon.w, game.dungeon.h
     return {
         "run_mode": getattr(game, "run_mode", RUN_MODE_GENERAL),
+        "seed": getattr(game, "seed", ""),
+        "elapsed_time": _elapsed_time(game),
         "depth": game.depth,
         "player": entity_to_dict(game.player),
         "inventory": {
@@ -335,7 +352,10 @@ def build_state(game: Any) -> dict[str, Any]:
             "xp_next": game.xp_next,
             "gold": game.gold,
             "kills": game.kills,
+            "bosses": getattr(game, "bosses_defeated", 0),
             "turns": game.turns,
+            "damage_dealt": getattr(game, "damage_dealt", 0),
+            "damage_taken": getattr(game, "damage_taken", 0),
             "killed_by": game.killed_by,
             "poison_turns": game.poison_turns,
             "poison_damage": game.poison_damage,
@@ -421,6 +441,18 @@ def apply_state(game: Any, data: dict[str, Any]) -> None:
     """Восстановить объект Game из состояния, не генерируя новый этаж."""
     game.run_mode = _run_mode(data.get("run_mode"))
     game.new_run_mode = game.run_mode
+    game.seed = normalize_seed(data.get("seed")) or generate_seed()
+    game.new_seed = game.seed
+    game.seed_editing = False
+    game.seed_edit_buffer = ""
+    game.seed_edit_fresh = False
+    game.elapsed_time = max(0.0, float(data.get("elapsed_time", 0.0)))
+    game.session_started_at = time.time()
+    game.finished_at = None
+    game.record_rank = None
+    game.run_recorded = False
+    game.records_cache = []
+    game.records_offset = 0
     game.depth = int(data["depth"])
     game.player = entity_from_dict(data["player"])
     _restore_inventory(game, data.get("inventory", {}))
@@ -436,7 +468,10 @@ def apply_state(game: Any, data: dict[str, Any]) -> None:
     game.xp_next = int(stats.get("xp_next", 15))
     game.gold = int(stats.get("gold", 0))
     game.kills = int(stats.get("kills", 0))
+    game.bosses_defeated = int(stats.get("bosses", 0))
     game.turns = int(stats.get("turns", 0))
+    game.damage_dealt = int(stats.get("damage_dealt", 0))
+    game.damage_taken = int(stats.get("damage_taken", 0))
     game.killed_by = str(stats.get("killed_by", ""))
     game.poison_turns = int(stats.get("poison_turns", 0))
     game.poison_damage = int(stats.get("poison_damage", 0))

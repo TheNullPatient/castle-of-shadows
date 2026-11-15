@@ -260,6 +260,7 @@ MODE_SETTINGS = "settings"
 MODE_HELP = "help"
 MODE_DEAD = "dead"
 MODE_MAP = "map"
+MODE_RECORDS = "records"
 
 # Режимы забега. Сейчас доступен только general — текущая полная игра;
 # остальные зарезервированы дорожной картой и постепенно открываются.

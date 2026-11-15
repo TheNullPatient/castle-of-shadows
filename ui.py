@@ -60,9 +60,11 @@ from constants import (
     MERCHANT_CHAR,
     MODE_AIM,
     MODE_CHEST,
+    MODE_DEAD,
     MODE_MAP,
     MODE_MENU,
     MODE_PAUSE,
+    MODE_RECORDS,
     MODE_RUN_MODES,
     MODE_SETTINGS,
     MODE_SHOP,
@@ -81,6 +83,7 @@ from constants import (
     RUN_MODE_SHORT,
 )
 from game import MSG_COLORS, Game
+from records import format_duration
 
 HELP_ROWS = [
     ("Move", "WASD / arrows / hjkl"),
@@ -148,13 +151,16 @@ def render(console: tcod.console.Console, game: Game) -> None:
     if game.mode == MODE_RUN_MODES:
         _render_run_modes(console, game)
         return
+    if game.mode == MODE_RECORDS:
+        _render_records(console, game)
+        return
     if game.mode == MODE_SETTINGS:
         _render_settings(console, game)
         return
     if game.mode == "help":
         _render_help(console, game)
         return
-    if game.mode == "dead":
+    if game.mode == MODE_DEAD:
         _render_death(console, game)
         return
     if game.mode == MODE_MAP:
@@ -970,9 +976,10 @@ def _slot_label(info: dict | None) -> str:
     except (OverflowError, OSError, ValueError):
         when = "--"
     mode = RUN_MODE_SHORT.get(info.get("run_mode", ""), "General")
+    seed = (info.get("seed") or "—")[:8]
     return (
         f"{mode:<11} D{info['depth']:>2}  LV {info['player_level']}  "
-        f"{info['turns']}t  {info['gold']}g  {when}"
+        f"{info['turns']}t  {info['gold']}g  {seed:<8}  {when}"
     )
 
 
@@ -1046,8 +1053,8 @@ def _render_slots(console: tcod.console.Console, game: Game) -> None:
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
     infos = game.slot_infos()
     screen_w, screen_h = game.screen_width(), game.screen_height()
-    width = min(screen_w - 4, 68)
-    height = min(screen_h - 2, len(infos) + 8)
+    width = min(screen_w - 4, 76)
+    height = min(screen_h - 2, len(infos) + 10)
     x0 = max(1, (screen_w - width) // 2)
     y0 = max(1, (screen_h - height) // 2)
     title = " Continue " if game.slot_action == "continue" else " New Game "
@@ -1076,6 +1083,36 @@ def _render_slots(console: tcod.console.Console, game: Game) -> None:
         text = f"{marker} {i + 1}) {_slot_label(info)}"
         fg = COLOR_GOLD if selected else (COLOR_UI if info else COLOR_DIM)
         console.print(x0 + 2, start_y + i, text[: width - 4], fg=fg, bg=COLOR_BG)
+    seed_y = y0 + height - 4
+    if game.slot_action == "new":
+        if game.seed_editing:
+            seed_line = (
+                f"Seed: {game.seed_edit_buffer}_"
+                "   type A-Z 0-9 · Enter confirm · Esc cancel"
+            )
+            seed_color = COLOR_GOLD
+        else:
+            seed_line = (
+                f"Seed: {game.new_seed}"
+                "   E edit · R random"
+            )
+            seed_color = COLOR_UI
+        console.print(
+            x0 + 2,
+            seed_y,
+            seed_line[: width - 4],
+            fg=seed_color,
+            bg=COLOR_BG,
+        )
+    elif game.slot_confirm_delete is None and game.slot_confirm_overwrite is None:
+        console.print(
+            x0 + 2,
+            seed_y,
+            "Each run keeps its own seed in the save."[: width - 4],
+            fg=COLOR_DIM,
+            bg=COLOR_BG,
+        )
+
     if game.slot_confirm_delete is not None:
         hint = f"Press Del again to delete slot {game.slot_confirm_delete}"
         hint_color = COLOR_WARN
@@ -1088,8 +1125,11 @@ def _render_slots(console: tcod.console.Console, game: Game) -> None:
     elif game.slot_action == "continue":
         hint = "Enter load   Del delete   ESC back"
         hint_color = COLOR_DIM
+    elif game.seed_editing:
+        hint = "Enter confirm   Esc cancel"
+        hint_color = COLOR_GOLD
     else:
-        hint = "Enter start   Del delete   ESC back"
+        hint = "Enter start   Del delete   E seed   R random   ESC back"
         hint_color = COLOR_DIM
     console.print(
         x0 + 2,
@@ -1178,7 +1218,7 @@ def _render_settings(console: tcod.console.Console, game: Game) -> None:
 def _render_pause(console: tcod.console.Console, game: Game) -> None:
     view_w, view_h = game.view_width(), game.view_height()
     width = min(view_w - 4, 58)
-    height = len(game.pause_options()) * 2 + 6
+    height = len(game.pause_options()) * 2 + 7
     x0 = max(1, (view_w - width) // 2)
     y0 = MAP_Y + max(0, (view_h - height) // 2)
     console.draw_frame(
@@ -1201,7 +1241,15 @@ def _render_pause(console: tcod.console.Console, game: Game) -> None:
         fg=COLOR_DIM,
         bg=COLOR_PANEL,
     )
-    start_y = y0 + 3
+    console.print(
+        x0 + 2,
+        y0 + 2,
+        f"Seed {game.seed} · {game.turns} turns"
+        f" · {game.kills} kills"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_PANEL,
+    )
+    start_y = y0 + 4
     for i, label in enumerate(game.pause_options()):
         selected = i == game.pause_index
         text = f"{'>' if selected else ' '} {label}"
@@ -1299,7 +1347,94 @@ def _render_help(console: tcod.console.Console, game: Game) -> None:
         )
 
 
+def _render_records(console: tcod.console.Console, game: Game) -> None:
+    """Таблица лучших завершённых забегов."""
+    console.clear(fg=COLOR_UI, bg=COLOR_BG)
+    screen_w, screen_h = game.screen_width(), game.screen_height()
+    width = min(screen_w - 4, 84)
+    height = min(screen_h - 2, len(game.records_cache) + 7)
+    height = max(height, 9)
+    x0 = max(1, (screen_w - width) // 2)
+    y0 = max(1, (screen_h - height) // 2)
+    console.draw_frame(
+        x0,
+        y0,
+        width,
+        height,
+        title=" RECORDS ",
+        fg=COLOR_GOLD,
+        bg=COLOR_BG,
+        clear=True,
+    )
+    subtitle = "Best completed runs, saved separately from slots"
+    console.print(
+        x0 + 2, y0 + 1, subtitle[: width - 4], fg=COLOR_DIM, bg=COLOR_BG
+    )
+    header = (
+        f"{'#':>2}  {'Mode':<11} {'Win':<3} {'Depth':>5} {'LV':>3} "
+        f"{'Kills':>5} {'Gold':>5} {'Score':>7}  Seed"
+    )
+    console.print(
+        x0 + 2, y0 + 3, header[: width - 4], fg=COLOR_DIM, bg=COLOR_BG
+    )
+    visible = max(1, height - 6)
+    entries = game.records_cache
+    if not entries:
+        console.print(
+            x0 + 2,
+            y0 + 5,
+            "No completed runs yet. Die or win to set a record."[
+                : width - 4
+            ],
+            fg=COLOR_DIM,
+            bg=COLOR_BG,
+        )
+    start = min(game.records_offset, max(0, len(entries) - visible))
+    for row, entry in enumerate(entries[start : start + visible]):
+        rank = start + row + 1
+        run_mode = RUN_MODE_SHORT.get(
+            entry.get("run_mode", ""), "General"
+        )
+        depth = int(entry.get("depth", 1))
+        line = (
+            f"{rank:>2}  {run_mode:<11} "
+            f"{'WIN' if entry.get('win') else '   ':<3} "
+            f"{depth:>2}/{MAX_DEPTH:<2} "
+            f"{int(entry.get('player_level', 1)):>3} "
+            f"{int(entry.get('kills', 0)):>5} "
+            f"{int(entry.get('gold', 0)):>5} "
+            f"{int(entry.get('score', 0)):>7}  "
+            f"{(entry.get('seed') or '—')[:12]}"
+        )
+        fg = COLOR_GOLD if entry.get("win") else COLOR_UI
+        if rank == 1:
+            fg = COLOR_GOLD
+        console.print(
+            x0 + 2, y0 + 4 + row, line[: width - 4], fg=fg, bg=COLOR_BG
+        )
+    if len(entries) > visible:
+        more = (
+            f"W/S scroll · {start + 1}-{min(start + visible, len(entries))}"
+            f"/{len(entries)}"
+        )
+        console.print(
+            x0 + width - 2 - len(more),
+            y0 + 1,
+            more[: width - 4],
+            fg=COLOR_DIM,
+            bg=COLOR_BG,
+        )
+    console.print(
+        x0 + 2,
+        y0 + height - 2,
+        "W/S scroll   Esc back"[: width - 4],
+        fg=COLOR_DIM,
+        bg=COLOR_BG,
+    )
+
+
 def _render_death(console: tcod.console.Console, game: Game) -> None:
+    summary = game.run_summary()
     if game.win:
         title = " VICTORY "
         frame_color = COLOR_GOLD
@@ -1313,17 +1448,31 @@ def _render_death(console: tcod.console.Console, game: Game) -> None:
         frame_color = COLOR_HP_LOW
         cause = f"Killed by {game.killed_by or 'unknown fate'}."
 
+    rank = game.record_rank
+    if rank == 1:
+        score_value = f"{summary['score']}  NEW BEST"
+    elif rank:
+        score_value = f"{summary['score']}  #{rank}"
+    else:
+        score_value = str(summary["score"])
+
     stats = [
+        ("Seed", summary["seed"] or "—"),
+        ("Score", score_value),
         ("Depth reached", f"{game.depth}/{MAX_DEPTH}"),
         ("Hero level", str(game.player_level)),
+        ("Bosses", f"{game.bosses_defeated}/5"),
         ("Gold", str(game.gold)),
         ("Kills", str(game.kills)),
         ("Turns", str(game.turns)),
+        ("Damage dealt", str(game.damage_dealt)),
+        ("Damage taken", str(game.damage_taken)),
+        ("Time", format_duration(summary["duration"])),
         ("XP", f"{game.player_xp}/{game.xp_next}"),
     ]
 
     screen_w, screen_h = game.screen_width(), game.screen_height()
-    width = min(screen_w - 6, 50)
+    width = min(screen_w - 6, 62)
     height = len(stats) + 8
     x0 = max(1, (screen_w - width) // 2)
     y0 = max(1, (screen_h - height) // 2)
@@ -1359,7 +1508,7 @@ def _render_death(console: tcod.console.Console, game: Game) -> None:
             fg=COLOR_UI,
             bg=COLOR_BG,
         )
-    prompt = "R restart  ·  any other key exit"
+    prompt = "R new run   Esc menu   Q quit"
     console.print(
         max(0, (screen_w - len(prompt)) // 2),
         y0 + height - 2,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+import time
 
 import numpy as np
 import tcod.map
@@ -55,6 +56,7 @@ from constants import (
     MODE_MENU,
     MODE_PAUSE,
     MODE_PLAYING,
+    MODE_RECORDS,
     MODE_RUN_MODES,
     MODE_SETTINGS,
     MODE_SHOP,
@@ -116,6 +118,15 @@ from entities import (
     shop_price,
 )
 from inventory import Inventory
+from records import (
+    MAX_SEED_LENGTH,
+    add_record,
+    floor_seed,
+    generate_seed,
+    load_records,
+    normalize_seed,
+    score_for_run,
+)
 from savegame import (
     SLOT_COUNT,
     apply_state,
@@ -188,7 +199,7 @@ class MessageLog:
 
 
 class Game:
-    MENU_OPTIONS = ("New Game", "How to Play", "Settings", "Quit")
+    MENU_OPTIONS = ("New Game", "How to Play", "Records", "Settings", "Quit")
     PAUSE_OPTIONS = (
         "Resume",
         "Settings",
@@ -204,6 +215,7 @@ class Game:
         run_mode: str = RUN_MODE_GENERAL,
         display_mode: str | None = None,
         auto_width: int | None = None,
+        seed: str | None = None,
     ) -> None:
         self.mode = MODE_MENU
         self.menu_index = 0
@@ -213,6 +225,11 @@ class Game:
         self.new_run_mode = run_mode
         self.run_mode_index = 0
         self.run_mode_note = ""
+        self.seed = normalize_seed(seed) or generate_seed()
+        self.new_seed = self.seed
+        self.seed_editing = False
+        self.seed_edit_buffer = ""
+        self.seed_edit_fresh = False
         if display_mode not in DISPLAY_MODES:
             display_mode = DEFAULT_DISPLAY_MODE
         self.display_mode = display_mode
@@ -245,7 +262,17 @@ class Game:
         self.xp_next = 15
         self.gold = 0
         self.kills = 0
+        self.bosses_defeated = 0
         self.turns = 0
+        self.damage_dealt = 0
+        self.damage_taken = 0
+        self.elapsed_time = 0.0
+        self.session_started_at = time.time()
+        self.finished_at: float | None = None
+        self.record_rank: int | None = None
+        self.run_recorded = False
+        self.records_cache: list[dict] = []
+        self.records_offset = 0
         # Счётчик атак игрока: main.py по нему останавливает автоповтор.
         self.player_attack_events = 0
         self.killed_by = ""
@@ -300,6 +327,7 @@ class Game:
                 "Continue",
                 "New Game",
                 "How to Play",
+                "Records",
                 "Settings",
                 "Quit",
             )
@@ -312,6 +340,10 @@ class Game:
         except ValueError:
             self.run_mode_index = 0
         self.run_mode_note = ""
+        self.new_seed = generate_seed()
+        self.seed_editing = False
+        self.seed_edit_buffer = ""
+        self.seed_edit_fresh = False
         self.mode = MODE_RUN_MODES
 
     def close_run_modes(self) -> None:
@@ -343,6 +375,80 @@ class Game:
     def run_mode_summary(self) -> str:
         """Название режима текущего забега для слотов и паузы."""
         return RUN_MODE_SHORT.get(self.run_mode, "General")
+
+    # --- Seed и рекорды ----------------------------------------------------
+    def begin_seed_edit(self) -> bool:
+        """Редактировать seed нового забега (только до старта)."""
+        if self.slot_action != "new":
+            return False
+        self.seed_editing = True
+        self.seed_edit_buffer = self.new_seed
+        # Первый введённый символ заменяет старый seed, а не дописывается
+        # к нему: так проще начать ввод с чистого листа.
+        self.seed_edit_fresh = True
+        return True
+
+    def cancel_seed_edit(self) -> bool:
+        if not self.seed_editing:
+            return False
+        self.seed_editing = False
+        self.seed_edit_buffer = ""
+        self.seed_edit_fresh = False
+        return True
+
+    def commit_seed_edit(self) -> str:
+        """Принять введённый seed; пустая строка означает случайный."""
+        if not self.seed_editing:
+            return self.new_seed
+        self.new_seed = normalize_seed(self.seed_edit_buffer) or generate_seed()
+        self.seed_editing = False
+        self.seed_edit_buffer = ""
+        self.seed_edit_fresh = False
+        return self.new_seed
+
+    def reroll_seed(self) -> str:
+        """Выдать новый случайный seed, если ещё не начали забег."""
+        if self.slot_action == "new" and not self.seed_editing:
+            self.new_seed = generate_seed()
+        return self.new_seed
+
+    def append_seed_text(self, text: str) -> None:
+        """Дописать символы в поле seed, отфильтровав недопустимые."""
+        if not self.seed_editing or not text:
+            return
+        if self.seed_edit_fresh:
+            combined = text
+            self.seed_edit_fresh = False
+        else:
+            combined = self.seed_edit_buffer + text
+        self.seed_edit_buffer = normalize_seed(combined)[:MAX_SEED_LENGTH]
+
+    def backspace_seed(self) -> None:
+        if self.seed_editing:
+            self.seed_edit_fresh = False
+            self.seed_edit_buffer = self.seed_edit_buffer[:-1]
+
+    def open_records(self) -> None:
+        """Показать таблицу лучших завершённых забегов."""
+        self.records_cache = load_records()
+        self.records_offset = 0
+        self.mode = MODE_RECORDS
+
+    def close_records(self) -> None:
+        if self.mode == MODE_RECORDS:
+            self.mode = MODE_MENU
+            self.menu_index = 0
+
+    def records_visible_rows(self) -> int:
+        """Сколько строк рекордов помещается на экране."""
+        return max(1, self.screen_height() - 8)
+
+    def scroll_records(self, delta: int) -> None:
+        visible = self.records_visible_rows()
+        max_offset = max(0, len(self.records_cache) - visible)
+        self.records_offset = max(
+            0, min(max_offset, self.records_offset + delta)
+        )
 
     # --- Отображение и настройки -----------------------------------------
     def screen_width(self) -> int:
@@ -522,7 +628,12 @@ class Game:
         delete_save(slot)
         run_mode = self.new_run_mode
         display_mode = self.display_mode
-        self.__init__(run_mode=run_mode, display_mode=display_mode)
+        seed = self.new_seed or generate_seed()
+        self.__init__(
+            run_mode=run_mode,
+            display_mode=display_mode,
+            seed=seed,
+        )
         self.slot = slot
         self.mode = MODE_PLAYING
         self.save()
@@ -606,6 +717,10 @@ class Game:
         return self.run_mode != RUN_MODE_CLASSIC
 
     def new_level(self, first: bool = False) -> None:
+        # Один и тот же seed всегда даёт одинаковый этаж: генерация контента
+        # начинается с детерминированного зерна, а бой дальше использует
+        # обычный поток random.
+        random.seed(floor_seed(self.seed, self.depth))
         if not first:
             self._expire_maps()
         width, height = self.level_dimensions()
@@ -1750,7 +1865,9 @@ class Game:
                 1,
                 self.melee_atk - defender.df + random.randint(-1, 2),
             )
+            before = defender.hp
             defender.hp -= dmg
+            self.damage_dealt += min(dmg, max(0, before))
             self.msg(f"You hit {defender.name} for {dmg}.")
             wear = ENEMY_GEAR_WEAR.get(
                 defender.name,
@@ -1906,7 +2023,9 @@ class Game:
             - dist // 2
             + random.randint(-1, 2),
         )
+        before = target.hp
         target.hp -= dmg
+        self.damage_dealt += min(dmg, max(0, before))
         self.msg(f"Your arrow hits {target.name} for {dmg}.")
         wear = ENEMY_GEAR_WEAR.get(
             target.name,
@@ -1949,6 +2068,7 @@ class Game:
         self.player_xp += enemy.xp
         self.msg(f"{enemy.name} dies! (+{enemy.xp} XP)")
         if enemy.boss:
+            self.bosses_defeated += 1
             gold = random.randint(
                 20 + self.depth * 5,
                 40 + self.depth * 8,
@@ -1984,7 +2104,9 @@ class Game:
     ) -> None:
         if self.game_over:
             return
+        before = self.player.hp
         self.player.hp -= dmg
+        self.damage_taken += min(dmg, max(0, before))
         if wear_armor:
             amount = ARMOR_WEAR_PER_HIT
             if attacker is not None:
@@ -2048,7 +2170,9 @@ class Game:
             return
         self.poison_turns -= 1
         dmg = max(1, self.poison_damage)
+        before = self.player.hp
         self.player.hp -= dmg
+        self.damage_taken += min(dmg, max(0, before))
         if self.player.hp <= 0:
             self.player.hp = 0
             self.killed_by = "Poison"
@@ -2344,7 +2468,9 @@ class Game:
                 continue
             if not self.is_visible(e.x, e.y):
                 continue
+            before = e.hp
             e.hp -= damage
+            self.damage_dealt += min(damage, max(0, before))
             hits += 1
             self.msg(f"Fire burns {e.name} for {damage}.", "warn")
             if not e.alive():
@@ -2362,7 +2488,9 @@ class Game:
                 e.hp,
             ),
         )
+        before = target.hp
         target.hp -= damage
+        self.damage_dealt += min(damage, max(0, before))
         self.msg(f"Lightning strikes {target.name} for {damage}!", "warn")
         if not target.alive():
             self._kill_enemy(target)
@@ -2532,6 +2660,43 @@ class Game:
         self.new_level()
         self.save()
 
+    def run_summary(self) -> dict:
+        """Сводка забега для экрана итогов и таблицы рекордов."""
+        ended = self.finished_at if self.finished_at is not None else time.time()
+        duration = self.elapsed_time + max(0.0, ended - self.session_started_at)
+        score = score_for_run(
+            depth=self.depth,
+            player_level=self.player_level,
+            kills=self.kills,
+            gold=self.gold,
+            bosses=self.bosses_defeated,
+            win=self.win,
+        )
+        if self.win:
+            cause = "Escaped the castle"
+        elif self.quit_requested:
+            cause = "Retreated"
+        else:
+            cause = self.killed_by or "Unknown fate"
+        return {
+            "date": ended,
+            "run_mode": self.run_mode,
+            "seed": self.seed,
+            "win": self.win,
+            "quit": self.quit_requested,
+            "cause": cause,
+            "depth": self.depth,
+            "player_level": self.player_level,
+            "kills": self.kills,
+            "bosses": self.bosses_defeated,
+            "gold": self.gold,
+            "turns": self.turns,
+            "damage_dealt": self.damage_dealt,
+            "damage_taken": self.damage_taken,
+            "duration": round(duration, 1),
+            "score": score,
+        }
+
     def finish(self, win: bool = False, quit_requested: bool = False) -> None:
         self.win = win
         self.quit_requested = quit_requested
@@ -2540,6 +2705,11 @@ class Game:
         self.chest_deposit_mode = False
         if self.slot is not None:
             delete_save(self.slot)
+        if self.finished_at is None:
+            self.finished_at = time.time()
+        if not self.run_recorded and self.player is not None:
+            self.run_recorded = True
+            self.record_rank = add_record(self.run_summary())
         self.mode = MODE_DEAD
 
     def toggle_help(self) -> None:
