@@ -48,7 +48,7 @@ from display import (
     minimum_window_size,
 )
 from game import Game
-from settings import load_display_mode, save_display_mode
+from settings import load_settings, save_settings
 from ui import render
 
 MOVE_KEYS = {
@@ -715,7 +715,7 @@ def _handle_records(game: Game, event: tcod.event.KeyDown) -> bool:
 
 
 def _handle_settings(game: Game, event: tcod.event.KeyDown) -> bool:
-    """Выбор режима отображения; применяется по Enter и сохраняется в main."""
+    """Выбор режима окна или стиля карты; применяется по Enter."""
     sym = event.sym
     if sym in (KeySym.ESCAPE, KeySym.Q):
         game.close_settings()
@@ -734,7 +734,7 @@ def _handle_settings(game: Game, event: tcod.event.KeyDown) -> bool:
         game.settings_move(1)
         return False
     if sym in (KeySym.RETURN, KeySym.KP_ENTER, KeySym.SPACE):
-        game.apply_display_selection()
+        game.apply_settings_selection()
         return False
     return False
 
@@ -1048,8 +1048,12 @@ def _handle_shop(game: Game, event: tcod.event.KeyDown) -> bool:
 
 
 def main() -> None:
-    use_display_mode = load_display_mode()
-    game = Game(build_level=False, display_mode=use_display_mode)
+    stored = load_settings()
+    game = Game(
+        build_level=False,
+        display_mode=stored["display_mode"],
+        map_style=stored["map_style"],
+    )
     screen_w, screen_h = game.screen_width(), game.screen_height()
     window_w, window_h = _window_pixels(game, screen_w, screen_h)
     tileset = load_tileset()
@@ -1150,9 +1154,17 @@ def main() -> None:
                 console = _sync_auto_console(context, game, console)
                 needs_fit = True
 
+            if game.settings_dirty:
+                game.settings_dirty = False
+                save_settings(
+                    {
+                        "display_mode": game.display_mode,
+                        "map_style": game.map_style,
+                    }
+                )
+
             if game.display_changed:
                 game.display_changed = False
-                save_display_mode(game.display_mode)
                 new_w = game.screen_width()
                 new_h = game.screen_height()
                 console = tcod.console.Console(new_w, new_h, order="F")

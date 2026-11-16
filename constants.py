@@ -59,6 +59,23 @@ DISPLAY_MODES = {
 AUTO_DISPLAY_MODE = "auto"
 DEFAULT_DISPLAY_MODE = AUTO_DISPLAY_MODE
 
+# Стиль карты. Relief — объёмный рендер со стенами-гранями, текстурой пола и
+# факелами; Classic — прежняя плоская карта, где стена это `#`, а пол — `.`.
+MAP_STYLE_RELIEF = "relief"
+MAP_STYLE_CLASSIC = "classic"
+MAP_STYLE_ORDER = (MAP_STYLE_RELIEF, MAP_STYLE_CLASSIC)
+MAP_STYLES = {
+    MAP_STYLE_RELIEF: {
+        "label": "Relief",
+        "note": "shaded walls, textures, torches",
+    },
+    MAP_STYLE_CLASSIC: {
+        "label": "Classic",
+        "note": "flat walls and floors",
+    },
+}
+DEFAULT_MAP_STYLE = MAP_STYLE_RELIEF
+
 FOV_RADIUS = 11  # радиус обзора; стены на краю подсвечиваются отдельно
 MAX_DEPTH = 25
 

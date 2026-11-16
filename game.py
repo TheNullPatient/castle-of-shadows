@@ -31,6 +31,7 @@ from constants import (
     COLOR_MSG,
     COLOR_WARN,
     DEFAULT_DISPLAY_MODE,
+    DEFAULT_MAP_STYLE,
     DESCEND_HEAL_MIN,
     DESCEND_HEAL_RATIO,
     DISPLAY_MODE_ORDER,
@@ -42,6 +43,8 @@ from constants import (
     LOG_H,
     LOG_HISTORY,
     MAP_H,
+    MAP_STYLE_ORDER,
+    MAP_STYLES,
     MAP_W,
     MAX_DEPTH,
     MAX_ENEMIES,
@@ -216,6 +219,7 @@ class Game:
         display_mode: str | None = None,
         auto_width: int | None = None,
         seed: str | None = None,
+        map_style: str = DEFAULT_MAP_STYLE,
     ) -> None:
         self.mode = MODE_MENU
         self.menu_index = 0
@@ -240,6 +244,10 @@ class Game:
         else:
             self.auto_width = int(DISPLAY_MODES[AUTO_DISPLAY_MODE]["width"])
         self.display_changed = False
+        if map_style not in MAP_STYLES:
+            map_style = DEFAULT_MAP_STYLE
+        self.map_style = map_style
+        self.settings_dirty = False
         self.settings_index = DISPLAY_MODE_ORDER.index(display_mode)
         self.settings_return_mode = MODE_MENU
         self.help_return_mode = MODE_MENU
@@ -501,9 +509,6 @@ class Game:
         info = DISPLAY_MODES.get(self.display_mode)
         return info["label"] if info else self.display_mode
 
-    def display_mode_at(self, index: int) -> str:
-        return DISPLAY_MODE_ORDER[index % len(DISPLAY_MODE_ORDER)]
-
     def open_settings(self, return_mode: str | None = None) -> None:
         """Открыть настройки из главного меню или паузы."""
         if return_mode not in (MODE_MENU, MODE_PAUSE):
@@ -516,21 +521,40 @@ class Game:
         if self.mode == MODE_SETTINGS:
             self.mode = self.settings_return_mode
 
+    def settings_entries(self) -> list[tuple[str, str]]:
+        """Пункты настроек: режимы отображения, затем стиль карты."""
+        entries = [("display", mode) for mode in DISPLAY_MODE_ORDER]
+        entries += [("map_style", style) for style in MAP_STYLE_ORDER]
+        return entries
+
+    def selected_setting(self) -> tuple[str, str]:
+        entries = self.settings_entries()
+        return entries[self.settings_index % len(entries)]
+
     def settings_move(self, delta: int) -> None:
         self.settings_index = (
             self.settings_index + delta
-        ) % len(DISPLAY_MODE_ORDER)
+        ) % len(self.settings_entries())
 
-    def selected_display_mode(self) -> str:
-        return self.display_mode_at(self.settings_index)
-
-    def apply_display_selection(self) -> bool:
-        mode = self.selected_display_mode()
-        if mode == self.display_mode == AUTO_DISPLAY_MODE:
+    def apply_settings_selection(self) -> bool:
+        """Применить выбранный пункт: режим окна или стиль карты."""
+        kind, value = self.selected_setting()
+        if kind == "map_style":
+            return self.set_map_style(value)
+        if value == self.display_mode == AUTO_DISPLAY_MODE:
             self.refresh_auto_width()
             self.display_changed = True
+            self.settings_dirty = True
             return True
-        return self.set_display_mode(mode)
+        return self.set_display_mode(value)
+
+    def set_map_style(self, style: str) -> bool:
+        """Сменить стиль карты; меняется сразу, без пересоздания окна."""
+        if style not in MAP_STYLES or style == self.map_style:
+            return False
+        self.map_style = style
+        self.settings_dirty = True
+        return True
 
     def set_display_mode(self, mode: str) -> bool:
         """Сменить режим отображения; main.py пересоздаст окно и консоль."""
@@ -541,6 +565,7 @@ class Game:
             self.refresh_auto_width()
         self.settings_index = DISPLAY_MODE_ORDER.index(mode)
         self.display_changed = True
+        self.settings_dirty = True
         return True
 
     def slot_infos(self) -> list[dict | None]:

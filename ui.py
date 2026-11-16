@@ -55,6 +55,9 @@ from constants import (
     HINT_Y,
     LOG_H,
     LOG_Y,
+    MAP_STYLE_CLASSIC,
+    MAP_STYLE_ORDER,
+    MAP_STYLES,
     MAP_Y,
     MAX_DEPTH,
     MERCHANT_CHAR,
@@ -434,10 +437,15 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
     view_w, view_h = game.view_width(), game.view_height()
     biome = biome_index(game.depth)
     wall_color, floor_color = BIOME_COLORS[biome]
-    torches = _torches_in_view(game, left, top, view_w, view_h)
-    torch_here = {(tx, ty): flicker for tx, ty, flicker in torches}
-    lit = [torch for torch in torches if game.is_visible(torch[0], torch[1])]
-    glow = _torch_light(lit, grid, left, top, view_w, view_h)
+    relief = game.map_style != MAP_STYLE_CLASSIC
+    if relief:
+        torches = _torches_in_view(game, left, top, view_w, view_h)
+        torch_here = {(tx, ty): flicker for tx, ty, flicker in torches}
+        lit = [torch for torch in torches if game.is_visible(torch[0], torch[1])]
+        glow = _torch_light(lit, grid, left, top, view_w, view_h)
+    else:
+        torch_here = {}
+        glow = None
     for sy in range(view_h):
         wy = top + sy
         if not 0 <= wy < game.dungeon.h:
@@ -456,37 +464,43 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
             special = _special_floor_color(room)
             if visible:
                 light = _light(game, wx, wy)
-                glow_r, glow_g, glow_b = glow[sy][sx]
                 bg = _warm_glow(game, wx, wy)
-                bg = (
-                    min(255, bg[0] + int(glow_r * _TORCH_LIGHT_BG)),
-                    min(255, bg[1] + int(glow_g * _TORCH_LIGHT_BG)),
-                    min(255, bg[2] + int(glow_b * _TORCH_LIGHT_BG)),
-                )
+                glow_r = glow_g = glow_b = 0.0
+                if glow is not None:
+                    glow_r, glow_g, glow_b = glow[sy][sx]
+                    bg = (
+                        min(255, bg[0] + int(glow_r * _TORCH_LIGHT_BG)),
+                        min(255, bg[1] + int(glow_g * _TORCH_LIGHT_BG)),
+                        min(255, bg[2] + int(glow_b * _TORCH_LIGHT_BG)),
+                    )
                 if ch == "#":
-                    ch, tone = _wall_style(grid, wx, wy)
-                    flicker = torch_here.get((wx, wy))
-                    if flicker is not None:
-                        ch = _TORCH_GLYPH
-                        fg = _add_light(
-                            _torch_fg(
-                                wall_color, light * tone * (0.90 + 0.10 * flicker)
-                            ),
-                            (
-                                glow_r * _TORCH_LIGHT_SELF,
-                                glow_g * _TORCH_LIGHT_SELF,
-                                glow_b * _TORCH_LIGHT_SELF,
-                            ),
-                        )
+                    if relief:
+                        ch, tone = _wall_style(grid, wx, wy)
+                        flicker = torch_here.get((wx, wy))
+                        if flicker is not None:
+                            ch = _TORCH_GLYPH
+                            fg = _add_light(
+                                _torch_fg(
+                                    wall_color,
+                                    light * tone * (0.90 + 0.10 * flicker),
+                                ),
+                                (
+                                    glow_r * _TORCH_LIGHT_SELF,
+                                    glow_g * _TORCH_LIGHT_SELF,
+                                    glow_b * _TORCH_LIGHT_SELF,
+                                ),
+                            )
+                        else:
+                            fg = _add_light(
+                                _tint(wall_color, light * tone),
+                                (
+                                    glow_r * _TORCH_LIGHT_WALL,
+                                    glow_g * _TORCH_LIGHT_WALL,
+                                    glow_b * _TORCH_LIGHT_WALL,
+                                ),
+                            )
                     else:
-                        fg = _add_light(
-                            _tint(wall_color, light * tone),
-                            (
-                                glow_r * _TORCH_LIGHT_WALL,
-                                glow_g * _TORCH_LIGHT_WALL,
-                                glow_b * _TORCH_LIGHT_WALL,
-                            ),
-                        )
+                        fg = _tint(wall_color, light)
                 elif ch == ">":
                     fg = _tint(COLOR_STAIRS, 0.75 + light * 0.25)
                     bg = _tint(COLOR_STAIRS, 0.10)
@@ -495,24 +509,30 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                 elif ch == TRASH_CHAR:
                     fg = _tint(COLOR_TRASH, 0.75 + light * 0.25)
                 else:
-                    ch = _floor_glyph(wx, wy, game.depth, biome, room)
-                    fg = _add_light(
-                        _tint(special or floor_color, light),
-                        (
-                            glow_r * _TORCH_LIGHT_FG,
-                            glow_g * _TORCH_LIGHT_FG,
-                            glow_b * _TORCH_LIGHT_FG,
-                        ),
-                    )
+                    if relief:
+                        ch = _floor_glyph(wx, wy, game.depth, biome, room)
+                        fg = _add_light(
+                            _tint(special or floor_color, light),
+                            (
+                                glow_r * _TORCH_LIGHT_FG,
+                                glow_g * _TORCH_LIGHT_FG,
+                                glow_b * _TORCH_LIGHT_FG,
+                            ),
+                        )
+                    else:
+                        fg = _tint(special or floor_color, light)
             else:
                 if ch == "#":
-                    ch, tone = _wall_style(grid, wx, wy)
-                    if (wx, wy) in torch_here:
-                        ch = _TORCH_GLYPH
-                        fg = _torch_fg(wall_color, 0.16 * tone + 0.12)
-                        bg = COLOR_BG
+                    if relief:
+                        ch, tone = _wall_style(grid, wx, wy)
+                        if (wx, wy) in torch_here:
+                            ch = _TORCH_GLYPH
+                            fg = _torch_fg(wall_color, 0.16 * tone + 0.12)
+                            bg = COLOR_BG
+                        else:
+                            fg = _tint(wall_color, 0.16 * tone + 0.12)
                     else:
-                        fg = _tint(wall_color, 0.16 * tone + 0.12)
+                        fg = _tint(wall_color, 0.28)
                 elif ch == ">":
                     fg = (40, 90, 55)
                 elif ch == SECRET_DOOR_CHAR:
@@ -520,7 +540,8 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                 elif ch == TRASH_CHAR:
                     fg = COLOR_TRASH_DARK
                 else:
-                    ch = _floor_glyph(wx, wy, game.depth, biome, room)
+                    if relief:
+                        ch = _floor_glyph(wx, wy, game.depth, biome, room)
                     if special:
                         fg = _tint(special, 0.22)
                     else:
@@ -537,6 +558,7 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
     biome = biome_index(game.depth)
     wall_color, floor_color = BIOME_COLORS[biome]
     biome_name = BIOME_NAMES[biome]
+    relief = game.map_style != MAP_STYLE_CLASSIC
     console.draw_frame(
         0,
         0,
@@ -566,12 +588,19 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
             special = _special_floor_color(room)
             bg = COLOR_BG
             if ch == "#":
-                ch, tone = _wall_style(grid, wx, wy)
-                if ch == "▓" and _torch_at(wx, wy, game.depth):
-                    ch = _TORCH_GLYPH
-                    fg = _torch_fg(wall_color, tone * (0.70 if visible else 0.48))
+                if relief:
+                    ch, tone = _wall_style(grid, wx, wy)
+                    if ch == "▓" and _torch_at(wx, wy, game.depth):
+                        ch = _TORCH_GLYPH
+                        fg = _torch_fg(
+                            wall_color, tone * (0.70 if visible else 0.48)
+                        )
+                    else:
+                        fg = _tint(
+                            wall_color, tone * (0.70 if visible else 0.48)
+                        )
                 else:
-                    fg = _tint(wall_color, tone * (0.70 if visible else 0.48))
+                    fg = _tint(wall_color, 0.62 if visible else 0.42)
             elif ch == ">":
                 fg = COLOR_STAIRS
             elif ch == SECRET_DOOR_CHAR:
@@ -579,7 +608,8 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
             elif ch == TRASH_CHAR:
                 fg = COLOR_TRASH
             else:
-                ch = _floor_glyph(wx, wy, game.depth, biome, room)
+                if relief:
+                    ch = _floor_glyph(wx, wy, game.depth, biome, room)
                 if special:
                     fg = _tint(special, 0.75 if visible else 0.50)
                 else:
@@ -1429,11 +1459,13 @@ def _render_slots(console: tcod.console.Console, game: Game) -> None:
 
 
 def _render_settings(console: tcod.console.Console, game: Game) -> None:
-    """Экран настроек отображения (главное меню и пауза)."""
+    """Экран настроек: режим окна и стиль карты (главное меню и пауза)."""
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
     screen_w, screen_h = game.screen_width(), game.screen_height()
-    width = min(screen_w - 4, 74)
-    height = len(DISPLAY_MODE_ORDER) * 2 + 9
+    width = min(screen_w - 4, 78)
+    display_rows = len(DISPLAY_MODE_ORDER) * 2
+    style_rows = len(MAP_STYLE_ORDER) * 2
+    height = display_rows + style_rows + 10
     x0 = max(1, (screen_w - width) // 2)
     y0 = max(1, (screen_h - height) // 2)
     console.draw_frame(
@@ -1478,10 +1510,32 @@ def _render_settings(console: tcod.console.Console, game: Game) -> None:
             fg=COLOR_GOLD if selected else COLOR_UI,
             bg=COLOR_BG,
         )
+    style_title_y = start_y + display_rows + 1
+    console.print(
+        x0 + 2,
+        style_title_y,
+        "Map style"[: width - 4],
+        fg=COLOR_UI,
+        bg=COLOR_BG,
+    )
+    style_start_y = style_title_y + 1
+    for j, style in enumerate(MAP_STYLE_ORDER):
+        selected = len(DISPLAY_MODE_ORDER) + j == game.settings_index
+        info = MAP_STYLES[style]
+        marker = ">" if selected else " "
+        current = " *" if style == game.map_style else ""
+        text = f"{marker} {info['label']:<14} {info['note']}{current}"
+        console.print(
+            x0 + 2,
+            style_start_y + j * 2,
+            text[: width - 4],
+            fg=COLOR_GOLD if selected else COLOR_UI,
+            bg=COLOR_BG,
+        )
     console.print(
         x0 + 2,
         y0 + height - 4,
-        "Floors are unchanged: Classic runs stay 70x22 and centered."[
+        "Map style is visual only: layout and rules stay the same."[
             : width - 4
         ],
         fg=COLOR_DIM,
