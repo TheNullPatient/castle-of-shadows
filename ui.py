@@ -81,6 +81,7 @@ from constants import (
     RUN_MODE_NAMES,
     RUN_MODE_ORDER,
     RUN_MODE_SHORT,
+    TORCH_STONE,
     WALL_TORCH_CHAR,
 )
 from game import MSG_COLORS, Game
@@ -145,27 +146,27 @@ _TORCH_CHANCE = 7  # процент освещённых граней стен �
 _TORCH_RADIUS = 4.5
 _TORCH_FALLOFF = 2.0
 _TORCH_GLYPH = WALL_TORCH_CHAR  # запечённый спрайт «ниша с факелом»
-_TORCH_BIOME_TINT = 0.45  # насколько камень ниши подкрашивается цветом биома
 # Насколько сильно факел освещает фон (пятно на полу), символы пола и стены.
 _TORCH_LIGHT_BG = 0.45
 _TORCH_LIGHT_FG = 1.00
 _TORCH_LIGHT_WALL = 0.60
+_TORCH_LIGHT_SELF = 1.25  # насколько светится сама ниша с огнём
 _TORCH_LIGHT_RGB = (84.0, 36.0, 9.0)  # прибавка каналов в центре пятна
 
 
 def _torch_fg(wall_color: tuple[int, int, int], level: float) -> tuple[int, int, int]:
     """Цвет текста для клетки факела.
 
-    Спрайт факела запечён в нейтральных цветах, а цвет текста работает как
-    фильтр: он же подмешивает оттенок биома, чтобы ниша не выбивалась из
-    стены, но пламя остаётся ярким.
+    Уровень передаётся такой же, как у соседней грани стены, но камень в
+    спрайте запечён в своём сером (``TORCH_STONE``), а не белым, как обычный
+    глиф. Поэтому цвет текста компенсируется по каналам — иначе ниша в
+    темноте выглядела бы темнее стены. Пламя при этом остаётся ярким, так
+    как его пиксели в спрайте почти белые.
     """
-    peak = max(wall_color) or 1
-    tint = []
-    for channel in wall_color:
-        norm = channel / peak
-        tint.append(255.0 * (1.0 - _TORCH_BIOME_TINT + _TORCH_BIOME_TINT * norm))
-    return _tint(tuple(int(round(c)) for c in tint), level)
+    return tuple(
+        min(255, int(round(channel * level * 255.0 / stone)))
+        for channel, stone in zip(wall_color, TORCH_STONE)
+    )
 
 
 def _wall_face(grid: list[list[str]], x: int, y: int) -> bool:
@@ -257,6 +258,9 @@ def _torch_light(
     width = len(grid[0]) if height else 0
 
     for tx, ty, flicker in torches:
+        # Сама ниша — источник света, поэтому её клетка тоже получает тепло
+        # (именно её и подсвечивает спрайт факела).
+        _add_glow(glow, tx - left, ty - top, flicker)
         seen: set[tuple[int, int]] = set()
         queue: list[tuple[int, int]] = []
         for dx, dy in _TORCH_NEIGHBORS:
@@ -464,8 +468,16 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     flicker = torch_here.get((wx, wy))
                     if flicker is not None:
                         ch = _TORCH_GLYPH
-                        fg = _torch_fg(wall_color, 0.86 + 0.14 * flicker)
-                        bg = COLOR_BG
+                        fg = _add_light(
+                            _torch_fg(
+                                wall_color, light * tone * (0.90 + 0.10 * flicker)
+                            ),
+                            (
+                                glow_r * _TORCH_LIGHT_SELF,
+                                glow_g * _TORCH_LIGHT_SELF,
+                                glow_b * _TORCH_LIGHT_SELF,
+                            ),
+                        )
                     else:
                         fg = _add_light(
                             _tint(wall_color, light * tone),
@@ -497,7 +509,7 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     ch, tone = _wall_style(grid, wx, wy)
                     if (wx, wy) in torch_here:
                         ch = _TORCH_GLYPH
-                        fg = _torch_fg(wall_color, 0.22)
+                        fg = _torch_fg(wall_color, 0.16 * tone + 0.12)
                         bg = COLOR_BG
                     else:
                         fg = _tint(wall_color, 0.16 * tone + 0.12)
@@ -557,7 +569,7 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
                 ch, tone = _wall_style(grid, wx, wy)
                 if ch == "▓" and _torch_at(wx, wy, game.depth):
                     ch = _TORCH_GLYPH
-                    fg = _torch_fg(wall_color, 0.84 if visible else 0.42)
+                    fg = _torch_fg(wall_color, tone * (0.70 if visible else 0.48))
                 else:
                     fg = _tint(wall_color, tone * (0.70 if visible else 0.48))
             elif ch == ">":

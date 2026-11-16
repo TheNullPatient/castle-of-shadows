@@ -33,6 +33,10 @@ from constants import (
     MODE_TRASH,
     TILE_H,
     TILE_W,
+    TORCH_CORE,
+    TORCH_FLAME,
+    TORCH_PIT,
+    TORCH_STONE,
     TTF_PATH,
     TILESET_PATH,
     WALL_TORCH_CHAR,
@@ -136,15 +140,6 @@ def _tight_ttf_tileset(tile_w: int, tile_h: int) -> tcod.tileset.Tileset:
     return tileset
 
 
-# Цвета запечённого спрайта факела. Он непрозрачный, поэтому цвет текста
-# в клетке работает как общая яркость: белый — видимый факел, серый —
-# уже исследованная, но не освещённая часть карты.
-_TORCH_STONE = (128, 118, 108)
-_TORCH_PIT = (26, 22, 24)
-_TORCH_FLAME = (255, 168, 74)
-_TORCH_CORE = (255, 240, 200)
-
-
 def _smoothstep(edge0: float, edge1: float, x: np.ndarray) -> np.ndarray:
     """Плавный переход от 0 к 1 между edge0 и edge1 (в любую сторону)."""
     t = np.clip((x - edge0) / (edge1 - edge0), 0.0, 1.0)
@@ -163,8 +158,8 @@ def _torch_sprite(
     пропадает светящаяся рамка вокруг клетки.
     """
     yy, xx = np.indices((tile_h, tile_w), dtype=np.float32)
-    stone = np.array(_TORCH_STONE, dtype=np.float32) / 255.0
-    pit = np.array(_TORCH_PIT, dtype=np.float32) / 255.0
+    stone = np.array(TORCH_STONE, dtype=np.float32) / 255.0
+    pit = np.array(TORCH_PIT, dtype=np.float32) / 255.0
     rgb = pit + (stone - pit) * stone_mask[..., None]
 
     cx = (tile_w - 1) * 0.5
@@ -185,8 +180,8 @@ def _torch_sprite(
     rgb = rgb * (1.0 - halo[..., None]) + warm * halo[..., None]
 
     # Само пламя: оранжевая кромка и светлое ядро.
-    flame_rgb = np.array(_TORCH_FLAME, dtype=np.float32) / 255.0
-    core_rgb = np.array(_TORCH_CORE, dtype=np.float32) / 255.0
+    flame_rgb = np.array(TORCH_FLAME, dtype=np.float32) / 255.0
+    core_rgb = np.array(TORCH_CORE, dtype=np.float32) / 255.0
     hot = flame_rgb + (core_rgb - flame_rgb) * core[..., None]
     rgb = rgb * (1.0 - flame[..., None]) + hot * flame[..., None]
 
