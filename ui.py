@@ -81,6 +81,7 @@ from constants import (
     RUN_MODE_NAMES,
     RUN_MODE_ORDER,
     RUN_MODE_SHORT,
+    WALL_TORCH_CHAR,
 )
 from game import MSG_COLORS, Game
 from records import format_duration
@@ -140,6 +141,119 @@ def _warm_glow(game: Game, x: int, y: int) -> tuple[int, int, int]:
     return int(12 * strength), int(8 * strength), int(3 * strength)
 
 
+_TORCH_CHANCE = 7  # процент освещённых граней стен с факелом
+_TORCH_RADIUS = 5.0
+_TORCH_GLYPH = WALL_TORCH_CHAR  # запечённый спрайт «ниша с факелом»
+_TORCH_BIOME_TINT = 0.45  # насколько камень ниши подкрашивается цветом биома
+
+
+def _torch_fg(wall_color: tuple[int, int, int], level: float) -> tuple[int, int, int]:
+    """Цвет текста для клетки факела.
+
+    Спрайт факела запечён в нейтральных цветах, а цвет текста работает как
+    фильтр: он же подмешивает оттенок биома, чтобы ниша не выбивалась из
+    стены, но пламя остаётся ярким.
+    """
+    peak = max(wall_color) or 1
+    tint = []
+    for channel in wall_color:
+        norm = channel / peak
+        tint.append(255.0 * (1.0 - _TORCH_BIOME_TINT + _TORCH_BIOME_TINT * norm))
+    return _tint(tuple(int(round(c)) for c in tint), level)
+
+
+def _wall_face(grid: list[list[str]], x: int, y: int) -> bool:
+    """Стена, у которой хотя бы с одной стороны есть проход."""
+    height = len(grid)
+    width = len(grid[0]) if height else 0
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        nx, ny = x + dx, y + dy
+        if 0 <= nx < width and 0 <= ny < height and grid[ny][nx] != "#":
+            return True
+    return False
+
+
+def _torch_roll(x: int, y: int, depth: int) -> int:
+    return ((x * 92837111) ^ (y * 689287499) ^ (depth * 283923481)) % 100
+
+
+def _torch_at(x: int, y: int, depth: int) -> bool:
+    """Детерминированное место факела: не зависит от ходов и перерисовок."""
+    if _torch_roll(x, y, depth) >= _TORCH_CHANCE:
+        return False
+    # Не ставим два факела вплотную: иначе на стене получается «**».
+    return (
+        _torch_roll(x - 1, y, depth) >= _TORCH_CHANCE
+        and _torch_roll(x, y - 1, depth) >= _TORCH_CHANCE
+    )
+
+
+def _torches_in_view(
+    game: Game, left: int, top: int, view_w: int, view_h: int
+) -> list[tuple[int, int, float]]:
+    """Факелы рядом с экраном и их мягкое «дыхание» по номеру хода."""
+    grid = game.dungeon.grid
+    margin = int(_TORCH_RADIUS) + 1
+    phase_t = game.turns * 0.9
+    torches: list[tuple[int, int, float]] = []
+    for wy in range(
+        max(0, top - margin), min(game.dungeon.h, top + view_h + margin)
+    ):
+        for wx in range(
+            max(0, left - margin), min(game.dungeon.w, left + view_w + margin)
+        ):
+            if not (game.is_explored(wx, wy) or game.is_visible(wx, wy)):
+                continue
+            if grid[wy][wx] != "#" or not _wall_face(grid, wx, wy):
+                continue
+            if not _torch_at(wx, wy, game.depth):
+                continue
+            phase = (wx * 12.9898 + wy * 78.233 + game.depth * 37.719) % math.tau
+            flicker = 0.82 + 0.18 * (0.5 + 0.5 * math.sin(phase_t + phase))
+            torches.append((wx, wy, flicker))
+    return torches
+
+
+def _torch_light(
+    torches: list[tuple[int, int, float]],
+    left: int,
+    top: int,
+    view_w: int,
+    view_h: int,
+) -> list[list[tuple[float, float, float]]]:
+    """Суммарный тёплый свет факелов в экранных координатах."""
+    glow = [[(0.0, 0.0, 0.0) for _ in range(view_w)] for _ in range(view_h)]
+    radius = int(_TORCH_RADIUS)
+    for tx, ty, flicker in torches:
+        sy0 = max(0, ty - top - radius)
+        sy1 = min(view_h - 1, ty - top + radius)
+        sx0 = max(0, tx - left - radius)
+        sx1 = min(view_w - 1, tx - left + radius)
+        for sy in range(sy0, sy1 + 1):
+            for sx in range(sx0, sx1 + 1):
+                distance = math.hypot(left + sx - tx, top + sy - ty)
+                if distance > _TORCH_RADIUS:
+                    continue
+                strength = (1.0 - distance / _TORCH_RADIUS) ** 2 * flicker
+                r, g, b = glow[sy][sx]
+                glow[sy][sx] = (
+                    r + 64.0 * strength,
+                    g + 34.0 * strength,
+                    b + 11.0 * strength,
+                )
+    return glow
+
+
+def _add_light(
+    color: tuple[int, int, int], glow: tuple[float, float, float]
+) -> tuple[int, int, int]:
+    return (
+        min(255, int(color[0] + glow[0])),
+        min(255, int(color[1] + glow[1])),
+        min(255, int(color[2] + glow[2])),
+    )
+
+
 def render(console: tcod.console.Console, game: Game) -> None:
     console.clear()
     if game.mode == MODE_MENU:
@@ -185,6 +299,68 @@ def render(console: tcod.console.Console, game: Game) -> None:
         _render_pause(console, game)
 
 
+def _wall_style(grid: list[list[str]], x: int, y: int) -> tuple[str, float]:
+    """Глиф и тон стены: грань у пола, скос или глухая порода.
+
+    Благодаря трём тонам стены перестают быть однородной массой ``#``:
+    у проходов появляется светлая грань, а глубокая порода уходит в тень.
+    """
+    if _wall_face(grid, x, y):
+        return "▓", 0.88
+
+    height = len(grid)
+    width = len(grid[0]) if height else 0
+
+    def floor_at(dx: int, dy: int) -> bool:
+        nx, ny = x + dx, y + dy
+        return (
+            0 <= nx < width
+            and 0 <= ny < height
+            and grid[ny][nx] != "#"
+        )
+
+    if any(floor_at(dx, dy) for dx, dy in ((1, 1), (1, -1), (-1, 1), (-1, -1))):
+        return "▒", 0.60
+    return "#", 0.38
+
+
+def _floor_glyph(
+    x: int,
+    y: int,
+    depth: int,
+    biome: int,
+    special: str | None,
+) -> str:
+    """Детерминированная текстура пола, своя для каждого биома.
+
+    Узор не зависит от случайного потока, поэтому не мерцает между
+    перерисовками и совпадает на одинаковых seed/этаже.
+    """
+    if special in ("vault", "shop", "secret", "shrine"):
+        return "."
+    roll = (
+        (x * 73856093) ^ (y * 19349663) ^ (depth * 2654435761)
+    ) % 100
+    if special == "camp":
+        return "," if roll < 45 else "."
+    if biome == 1:  # Flooded Crypts
+        if roll < 8:
+            return "~"
+        if roll < 15:
+            return "·"
+    elif biome == 2:  # Ember Forges
+        if roll < 6:
+            return ","
+        if roll < 12:
+            return "·"
+    elif biome in (3, 4):  # Frozen Vaults, Shadow Sanctum
+        if roll < 6:
+            return "·"
+    elif roll < 5:  # Dungeon Halls
+        return "·"
+    return "."
+
+
 def _special_floor_color(kind: str | None) -> tuple[int, int, int] | None:
     if kind == "vault":
         return COLOR_VAULT_FLOOR
@@ -205,7 +381,12 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
     grid = game.dungeon.grid
     left, top = game.camera()
     view_w, view_h = game.view_width(), game.view_height()
-    wall_color, floor_color = BIOME_COLORS[biome_index(game.depth)]
+    biome = biome_index(game.depth)
+    wall_color, floor_color = BIOME_COLORS[biome]
+    torches = _torches_in_view(game, left, top, view_w, view_h)
+    torch_here = {(tx, ty): flicker for tx, ty, flicker in torches}
+    lit = [torch for torch in torches if game.is_visible(torch[0], torch[1])]
+    glow = _torch_light(lit, left, top, view_w, view_h)
     for sy in range(view_h):
         wy = top + sy
         if not 0 <= wy < game.dungeon.h:
@@ -220,33 +401,59 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
             explored = game.is_explored(wx, wy)
             if not visible and not explored:
                 continue
-            special = _special_floor_color(game.special_room_at(wx, wy))
+            room = game.special_room_at(wx, wy)
+            special = _special_floor_color(room)
             if visible:
                 light = _light(game, wx, wy)
+                glow_r, glow_g, glow_b = glow[sy][sx]
+                bg = _warm_glow(game, wx, wy)
+                bg = (
+                    min(255, bg[0] + int(glow_r * 0.32)),
+                    min(255, bg[1] + int(glow_g * 0.32)),
+                    min(255, bg[2] + int(glow_b * 0.32)),
+                )
                 if ch == "#":
-                    fg = _tint(wall_color, light)
+                    ch, tone = _wall_style(grid, wx, wy)
+                    flicker = torch_here.get((wx, wy))
+                    if flicker is not None:
+                        ch = _TORCH_GLYPH
+                        fg = _torch_fg(wall_color, 0.86 + 0.14 * flicker)
+                        bg = COLOR_BG
+                    else:
+                        fg = _tint(wall_color, light * tone)
                 elif ch == ">":
                     fg = _tint(COLOR_STAIRS, 0.75 + light * 0.25)
+                    bg = _tint(COLOR_STAIRS, 0.10)
                 elif ch == SECRET_DOOR_CHAR:
                     fg = _tint(COLOR_SECRET_DOOR, 0.75 + light * 0.25)
                 elif ch == TRASH_CHAR:
                     fg = _tint(COLOR_TRASH, 0.75 + light * 0.25)
                 else:
-                    fg = _tint(special or floor_color, light)
-                bg = _warm_glow(game, wx, wy)
+                    ch = _floor_glyph(wx, wy, game.depth, biome, room)
+                    fg = _add_light(
+                        _tint(special or floor_color, light), (glow_r, glow_g, glow_b)
+                    )
             else:
                 if ch == "#":
-                    fg = _tint(wall_color, 0.28)
+                    ch, tone = _wall_style(grid, wx, wy)
+                    if (wx, wy) in torch_here:
+                        ch = _TORCH_GLYPH
+                        fg = _torch_fg(wall_color, 0.22)
+                        bg = COLOR_BG
+                    else:
+                        fg = _tint(wall_color, 0.16 * tone + 0.12)
                 elif ch == ">":
                     fg = (40, 90, 55)
                 elif ch == SECRET_DOOR_CHAR:
                     fg = _tint(COLOR_SECRET_DOOR, 0.28)
                 elif ch == TRASH_CHAR:
                     fg = COLOR_TRASH_DARK
-                elif special:
-                    fg = _tint(special, 0.22)
                 else:
-                    fg = _tint(floor_color, 0.20)
+                    ch = _floor_glyph(wx, wy, game.depth, biome, room)
+                    if special:
+                        fg = _tint(special, 0.22)
+                    else:
+                        fg = _tint(floor_color, 0.20)
                 bg = COLOR_BG
             _put(console, sx, MAP_Y + sy, ch, fg, bg)
 
@@ -256,14 +463,15 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
     screen_w, screen_h = game.screen_width(), game.screen_height()
     map_w, map_h = game.map_view_width(), game.map_view_height()
-    wall_color, floor_color = BIOME_COLORS[biome_index(game.depth)]
-    biome = BIOME_NAMES[biome_index(game.depth)]
+    biome = biome_index(game.depth)
+    wall_color, floor_color = BIOME_COLORS[biome]
+    biome_name = BIOME_NAMES[biome]
     console.draw_frame(
         0,
         0,
         screen_w,
         screen_h,
-        title=f" MAP · Depth {game.depth} · {biome} ",
+        title=f" MAP · Depth {game.depth} · {biome_name} ",
         fg=COLOR_GOLD,
         bg=COLOR_BG,
         clear=True,
@@ -283,20 +491,29 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
                 continue
             ch = row[wx]
             visible = game.is_visible(wx, wy)
-            special = _special_floor_color(game.special_room_at(wx, wy))
+            room = game.special_room_at(wx, wy)
+            special = _special_floor_color(room)
+            bg = COLOR_BG
             if ch == "#":
-                fg = _tint(wall_color, 0.62 if visible else 0.42)
+                ch, tone = _wall_style(grid, wx, wy)
+                if ch == "▓" and _torch_at(wx, wy, game.depth):
+                    ch = _TORCH_GLYPH
+                    fg = _torch_fg(wall_color, 0.84 if visible else 0.42)
+                else:
+                    fg = _tint(wall_color, tone * (0.70 if visible else 0.48))
             elif ch == ">":
                 fg = COLOR_STAIRS
             elif ch == SECRET_DOOR_CHAR:
                 fg = _tint(COLOR_SECRET_DOOR, 0.75 if visible else 0.50)
             elif ch == TRASH_CHAR:
                 fg = COLOR_TRASH
-            elif special:
-                fg = _tint(special, 0.75 if visible else 0.50)
             else:
-                fg = _tint(floor_color, 0.72 if visible else 0.48)
-            _put(console, 1 + sx, 1 + sy, ch, fg, COLOR_BG)
+                ch = _floor_glyph(wx, wy, game.depth, biome, room)
+                if special:
+                    fg = _tint(special, 0.75 if visible else 0.50)
+                else:
+                    fg = _tint(floor_color, 0.72 if visible else 0.48)
+            _put(console, 1 + sx, 1 + sy, ch, fg, bg)
 
     spawn = getattr(game, "spawn", None)
     if spawn is not None and game.is_explored(spawn[0], spawn[1]):

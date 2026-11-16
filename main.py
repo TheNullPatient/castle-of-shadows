@@ -35,6 +35,7 @@ from constants import (
     TILE_W,
     TTF_PATH,
     TILESET_PATH,
+    WALL_TORCH_CHAR,
 )
 from display import (
     MIN_AUTO_WIDTH,
@@ -75,10 +76,14 @@ AIM_KEYS.update(
 
 # Глифы, которые реально встречаются в интерфейсе. Полный набор DejaVu
 # (3300+ символов) хранить в готовом тайлсете незачем — это лишняя память.
+# Важно: новый символ карты или HUD нужно добавить сюда, иначе его не будет
+# в тайлсете и клетка отрисуется пустой (так пропадали стены-«▓»).
 _USED_CODEPOINTS = (
     set(range(32, 127))  # ASCII
     | set(range(0x2500, 0x2580))  # рамки, которые рисует draw_frame
-    | {ord(ch) for ch in "·—█░▒▲▼×"}
+    | set(range(0x2580, 0x25A0))  # блоки: █ ▓ ▒ ░ и их четверти
+    | {ord(ch) for ch in "·—▲▼×"}
+    | {ord(WALL_TORCH_CHAR)}  # спрайт «ниша с факелом»
 )
 
 # Границы, чтобы окно нельзя было «уменьшить в ноль» и чтобы тайлсет
@@ -131,18 +136,91 @@ def _tight_ttf_tileset(tile_w: int, tile_h: int) -> tcod.tileset.Tileset:
     return tileset
 
 
+# Цвета запечённого спрайта факела. Он непрозрачный, поэтому цвет текста
+# в клетке работает как общая яркость: белый — видимый факел, серый —
+# уже исследованная, но не освещённая часть карты.
+_TORCH_STONE = (128, 118, 108)
+_TORCH_PIT = (26, 22, 24)
+_TORCH_FLAME = (255, 168, 74)
+_TORCH_CORE = (255, 240, 200)
+
+
+def _smoothstep(edge0: float, edge1: float, x: np.ndarray) -> np.ndarray:
+    """Плавный переход от 0 к 1 между edge0 и edge1 (в любую сторону)."""
+    t = np.clip((x - edge0) / (edge1 - edge0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _torch_sprite(
+    tile_w: int, tile_h: int, stone_mask: np.ndarray
+) -> np.ndarray:
+    """Собрать непрозрачный спрайт «ниша с факелом» под размер клетки.
+
+    В клетке tcod живёт один символ и один цвет текста, поэтому наложение
+    делается заранее, в тайлсете. Растр ``▓`` берётся как яркость камня:
+    дырки глифа остаются тёмными, и клетка с факелом не выбивается из
+    стены. Пламя запекается в цвете — фон ему больше не нужен, поэтому
+    пропадает светящаяся рамка вокруг клетки.
+    """
+    yy, xx = np.indices((tile_h, tile_w), dtype=np.float32)
+    stone = np.array(_TORCH_STONE, dtype=np.float32) / 255.0
+    pit = np.array(_TORCH_PIT, dtype=np.float32) / 255.0
+    rgb = pit + (stone - pit) * stone_mask[..., None]
+
+    cx = (tile_w - 1) * 0.5
+    cy = tile_h * 0.56
+    half_w = max(tile_w * 0.20, 1.4)
+    half_h = max(tile_h * 0.24, 1.8)
+    u = (xx - cx) / half_w
+    v = (yy - cy) / half_h
+    width = 0.62 + 0.38 * v  # узкий верх, широкий низ — форма капли
+    radius = np.sqrt((u / width) ** 2 + v**2)
+
+    flame = _smoothstep(1.0, 0.30, radius)
+    core = _smoothstep(0.72, 0.0, radius)
+    halo = _smoothstep(2.1, 0.0, radius) * 0.45
+
+    # Тёплый отсвет на камне вокруг пламени.
+    warm = np.array((1.0, 0.55, 0.22), dtype=np.float32)
+    rgb = rgb * (1.0 - halo[..., None]) + warm * halo[..., None]
+
+    # Само пламя: оранжевая кромка и светлое ядро.
+    flame_rgb = np.array(_TORCH_FLAME, dtype=np.float32) / 255.0
+    core_rgb = np.array(_TORCH_CORE, dtype=np.float32) / 255.0
+    hot = flame_rgb + (core_rgb - flame_rgb) * core[..., None]
+    rgb = rgb * (1.0 - flame[..., None]) + hot * flame[..., None]
+
+    alpha = np.maximum(stone_mask, flame)
+    return np.dstack([np.clip(rgb, 0.0, 1.0), np.clip(alpha, 0.0, 1.0)]) * 255.0
+
+
+def _add_overlay_glyphs(tileset: tcod.tileset.Tileset) -> tcod.tileset.Tileset:
+    """Добавить в тайлсет спрайт «ниша с факелом»."""
+    if 0x2593 not in tileset:
+        if ord("*") in tileset:  # запасной вариант: хотя бы звезда
+            tileset[ord(WALL_TORCH_CHAR)] = tileset[ord("*")]
+        return tileset
+    wall = np.array(tileset[0x2593], dtype=np.float32)
+    stone_mask = wall[:, :, 3] / 255.0
+    sprite = _torch_sprite(tileset.tile_width, tileset.tile_height, stone_mask)
+    tileset[ord(WALL_TORCH_CHAR)] = sprite.astype(np.uint8)
+    return tileset
+
+
 def load_tileset(tile_w: int = TILE_W, tile_h: int = TILE_H) -> tcod.tileset.Tileset:
     """Сначала пробуем TTF (он заметно чётче), иначе откатываемся на PNG."""
     tile_w = max(_MIN_TILE_W, int(tile_w))
     tile_h = max(_MIN_TILE_H, int(tile_h))
     if TTF_PATH.exists():
         try:
-            return _tight_ttf_tileset(tile_w, tile_h)
+            return _add_overlay_glyphs(_tight_ttf_tileset(tile_w, tile_h))
         except Exception as exc:  # pragma: no cover - зависит от сборки SDL
             print(f"Could not load TTF font ({exc}); falling back to tilesheet.")
     if not TILESET_PATH.exists():
         raise FileNotFoundError(f"Font not found: {TTF_PATH} or {TILESET_PATH}")
-    return tcod.tileset.load_tilesheet(TILESET_PATH, 32, 8, tcod.tileset.CHARMAP_TCOD)
+    return _add_overlay_glyphs(
+        tcod.tileset.load_tilesheet(TILESET_PATH, 32, 8, tcod.tileset.CHARMAP_TCOD)
+    )
 
 
 def _output_size(
