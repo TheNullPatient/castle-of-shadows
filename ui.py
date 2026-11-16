@@ -142,9 +142,15 @@ def _warm_glow(game: Game, x: int, y: int) -> tuple[int, int, int]:
 
 
 _TORCH_CHANCE = 7  # процент освещённых граней стен с факелом
-_TORCH_RADIUS = 5.0
+_TORCH_RADIUS = 4.5
+_TORCH_FALLOFF = 2.0
 _TORCH_GLYPH = WALL_TORCH_CHAR  # запечённый спрайт «ниша с факелом»
 _TORCH_BIOME_TINT = 0.45  # насколько камень ниши подкрашивается цветом биома
+# Насколько сильно факел освещает фон (пятно на полу), символы пола и стены.
+_TORCH_LIGHT_BG = 0.45
+_TORCH_LIGHT_FG = 1.00
+_TORCH_LIGHT_WALL = 0.60
+_TORCH_LIGHT_RGB = (84.0, 36.0, 9.0)  # прибавка каналов в центре пятна
 
 
 def _torch_fg(wall_color: tuple[int, int, int], level: float) -> tuple[int, int, int]:
@@ -214,33 +220,74 @@ def _torches_in_view(
     return torches
 
 
+_TORCH_SIDES = ((1, 0), (-1, 0), (0, 1), (0, -1))
+_TORCH_NEIGHBORS = _TORCH_SIDES + ((1, 1), (1, -1), (-1, 1), (-1, -1))
+
+
+def _add_glow(
+    glow: list[list[tuple[float, float, float]]], sx: int, sy: int, value: float
+) -> None:
+    """Добавить тепла в экранную клетку, если она на экране."""
+    if not (0 <= sy < len(glow) and 0 <= sx < len(glow[0])):
+        return
+    r, g, b = glow[sy][sx]
+    glow[sy][sx] = (
+        r + _TORCH_LIGHT_RGB[0] * value,
+        g + _TORCH_LIGHT_RGB[1] * value,
+        b + _TORCH_LIGHT_RGB[2] * value,
+    )
+
+
 def _torch_light(
     torches: list[tuple[int, int, float]],
+    grid: list[list[str]],
     left: int,
     top: int,
     view_w: int,
     view_h: int,
 ) -> list[list[tuple[float, float, float]]]:
-    """Суммарный тёплый свет факелов в экранных координатах."""
+    """Суммарный тёплый свет факелов в экранных координатах.
+
+    Свет расходится только по проходимым клеткам, поэтому не просачивается
+    сквозь стены: пятно обрывается на кладке и мягко ложится на соседние
+    грани.
+    """
     glow = [[(0.0, 0.0, 0.0) for _ in range(view_w)] for _ in range(view_h)]
-    radius = int(_TORCH_RADIUS)
+    height = len(grid)
+    width = len(grid[0]) if height else 0
+
     for tx, ty, flicker in torches:
-        sy0 = max(0, ty - top - radius)
-        sy1 = min(view_h - 1, ty - top + radius)
-        sx0 = max(0, tx - left - radius)
-        sx1 = min(view_w - 1, tx - left + radius)
-        for sy in range(sy0, sy1 + 1):
-            for sx in range(sx0, sx1 + 1):
-                distance = math.hypot(left + sx - tx, top + sy - ty)
-                if distance > _TORCH_RADIUS:
+        seen: set[tuple[int, int]] = set()
+        queue: list[tuple[int, int]] = []
+        for dx, dy in _TORCH_NEIGHBORS:
+            nx, ny = tx + dx, ty + dy
+            if 0 <= nx < width and 0 <= ny < height and grid[ny][nx] != "#":
+                seen.add((nx, ny))
+                queue.append((nx, ny))
+
+        while queue:
+            wx, wy = queue.pop()
+            distance = math.hypot(wx - tx, wy - ty)
+            strength = max(0.0, 1.0 - distance / _TORCH_RADIUS) ** _TORCH_FALLOFF
+            if strength <= 0.0:
+                continue
+            value = strength * flicker
+            _add_glow(glow, wx - left, wy - top, value)
+            # Ближние грани стен подсвечиваются, но дальше свет не идёт.
+            for dx, dy in _TORCH_SIDES:
+                nx, ny = wx + dx, wy + dy
+                if 0 <= nx < width and 0 <= ny < height and grid[ny][nx] == "#":
+                    _add_glow(glow, nx - left, ny - top, value)
+            for dx, dy in _TORCH_NEIGHBORS:
+                nx, ny = wx + dx, wy + dy
+                if not (0 <= nx < width and 0 <= ny < height):
                     continue
-                strength = (1.0 - distance / _TORCH_RADIUS) ** 2 * flicker
-                r, g, b = glow[sy][sx]
-                glow[sy][sx] = (
-                    r + 64.0 * strength,
-                    g + 34.0 * strength,
-                    b + 11.0 * strength,
-                )
+                if grid[ny][nx] == "#" or (nx, ny) in seen:
+                    continue
+                if math.hypot(nx - tx, ny - ty) > _TORCH_RADIUS:
+                    continue
+                seen.add((nx, ny))
+                queue.append((nx, ny))
     return glow
 
 
@@ -386,7 +433,7 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
     torches = _torches_in_view(game, left, top, view_w, view_h)
     torch_here = {(tx, ty): flicker for tx, ty, flicker in torches}
     lit = [torch for torch in torches if game.is_visible(torch[0], torch[1])]
-    glow = _torch_light(lit, left, top, view_w, view_h)
+    glow = _torch_light(lit, grid, left, top, view_w, view_h)
     for sy in range(view_h):
         wy = top + sy
         if not 0 <= wy < game.dungeon.h:
@@ -408,9 +455,9 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                 glow_r, glow_g, glow_b = glow[sy][sx]
                 bg = _warm_glow(game, wx, wy)
                 bg = (
-                    min(255, bg[0] + int(glow_r * 0.32)),
-                    min(255, bg[1] + int(glow_g * 0.32)),
-                    min(255, bg[2] + int(glow_b * 0.32)),
+                    min(255, bg[0] + int(glow_r * _TORCH_LIGHT_BG)),
+                    min(255, bg[1] + int(glow_g * _TORCH_LIGHT_BG)),
+                    min(255, bg[2] + int(glow_b * _TORCH_LIGHT_BG)),
                 )
                 if ch == "#":
                     ch, tone = _wall_style(grid, wx, wy)
@@ -420,7 +467,14 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                         fg = _torch_fg(wall_color, 0.86 + 0.14 * flicker)
                         bg = COLOR_BG
                     else:
-                        fg = _tint(wall_color, light * tone)
+                        fg = _add_light(
+                            _tint(wall_color, light * tone),
+                            (
+                                glow_r * _TORCH_LIGHT_WALL,
+                                glow_g * _TORCH_LIGHT_WALL,
+                                glow_b * _TORCH_LIGHT_WALL,
+                            ),
+                        )
                 elif ch == ">":
                     fg = _tint(COLOR_STAIRS, 0.75 + light * 0.25)
                     bg = _tint(COLOR_STAIRS, 0.10)
@@ -431,7 +485,12 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                 else:
                     ch = _floor_glyph(wx, wy, game.depth, biome, room)
                     fg = _add_light(
-                        _tint(special or floor_color, light), (glow_r, glow_g, glow_b)
+                        _tint(special or floor_color, light),
+                        (
+                            glow_r * _TORCH_LIGHT_FG,
+                            glow_g * _TORCH_LIGHT_FG,
+                            glow_b * _TORCH_LIGHT_FG,
+                        ),
                     )
             else:
                 if ch == "#":
