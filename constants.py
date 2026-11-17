@@ -207,6 +207,39 @@ ALTAR_HEAL_RATIO = 0.30
 # и стена рисуются одной картинкой.
 WALL_TORCH_CHAR = "\ue000"
 
+# Запечённые спрайты предметов и врагов. Символы лежат в Private Use Area:
+# в шрифте их нет, зато main.load_tileset подставляет под них готовые
+# картинки. Ключи используются и в ui.py, чтобы выбрать спрайт по предмету
+# или имени врага.
+SPRITE_CHARS = {
+    "item_sword": "\ue010",
+    "item_axe": "\ue011",
+    "item_spear": "\ue012",
+    "item_hammer": "\ue013",
+    "item_bow": "\ue014",
+    "item_armor": "\ue015",
+    "item_potion_health": "\ue016",
+    "item_potion_antidote": "\ue017",
+    "item_potion_boost": "\ue018",
+    "item_scroll": "\ue019",
+    "item_gold": "\ue01a",
+    "enemy_rat": "\ue020",
+    "enemy_bat": "\ue021",
+    "enemy_goblin": "\ue022",
+    "enemy_skeleton": "\ue023",
+    "enemy_orc": "\ue024",
+    "enemy_spider": "\ue025",
+    "enemy_cultist": "\ue026",
+    "enemy_troll": "\ue027",
+    "enemy_golem": "\ue028",
+    "enemy_dragon": "\ue029",
+    "boss_skeleton_king": "\ue02a",
+    "boss_troll_chieftain": "\ue02b",
+    "boss_wyvern": "\ue02c",
+    "boss_lich": "\ue02d",
+    "boss_shadow_lord": "\ue02e",
+}
+
 # Палитра запечённого спрайта факела. Камень здесь не белый, как у обычного
 # глифа, поэтому ui.py компенсирует его яркость цветом текста (TORCH_STONE
 # нужен там же, чтобы ниша не темнела сильнее соседней стены).

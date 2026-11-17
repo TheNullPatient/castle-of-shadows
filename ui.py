@@ -74,6 +74,7 @@ from constants import (
     MODE_SLOTS,
     SCREEN_W,
     SECRET_DOOR_CHAR,
+    SPRITE_CHARS,
     STATUS_Y,
     TRAP_CHAR,
     TRASH_CAPACITY,
@@ -89,6 +90,7 @@ from constants import (
 )
 from game import MSG_COLORS, Game
 from records import format_duration
+from sprites import enemy_sprite_key, item_sprite_key
 
 HELP_ROWS = [
     ("Move", "WASD / arrows / hjkl"),
@@ -683,6 +685,17 @@ def _render_full_map(console: tcod.console.Console, game: Game) -> None:
     )
 
 
+def _sprite_glyph(game: Game, key: str | None, fallback: str) -> str:
+    """Спрайт предмета/врага вместо буквы.
+
+    В стиле `Classic` остаются прежние символы: там карта намеренно
+    плоская и без запечённых картинок.
+    """
+    if key is None or game.map_style == MAP_STYLE_CLASSIC:
+        return fallback
+    return SPRITE_CHARS.get(key, fallback)
+
+
 def _render_entities(console: tcod.console.Console, game: Game) -> None:
     left, top = game.camera()
     view_w, view_h = game.view_width(), game.view_height()
@@ -718,7 +731,12 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
         put(altar[0] - left, altar[1] - top, ALTAR_CHAR, color)
     for item in game.items:
         if game.is_visible(item.x, item.y):
-            put(item.x - left, item.y - top, item.char, item.color)
+            put(
+                item.x - left,
+                item.y - top,
+                _sprite_glyph(game, item_sprite_key(item), item.char),
+                item.color,
+            )
     for trap in game.traps:
         if not trap.revealed or not game.is_explored(trap.x, trap.y):
             continue
@@ -730,9 +748,16 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
     for enemy in game.enemies:
         if not game.is_visible(enemy.x, enemy.y):
             continue
+        key = enemy_sprite_key(enemy.name)
         ratio = max(0.2, enemy.hp / enemy.max_hp)
-        color = _tint(enemy.color, 0.62 + ratio * 0.38)
-        put(enemy.x - left, enemy.y - top, enemy.char, color)
+        dim = 0.72 if key and game.map_style != MAP_STYLE_CLASSIC else 0.62
+        color = _tint(enemy.color, dim + ratio * (1.0 - dim))
+        put(
+            enemy.x - left,
+            enemy.y - top,
+            _sprite_glyph(game, key, enemy.char),
+            color,
+        )
     player = game.player
     put(player.x - left, player.y - top, "@", COLOR_PLAYER)
 

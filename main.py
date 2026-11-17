@@ -31,6 +31,7 @@ from constants import (
     MODE_SHOP,
     MODE_SLOTS,
     MODE_TRASH,
+    SPRITE_CHARS,
     TILE_H,
     TILE_W,
     TORCH_CORE,
@@ -49,6 +50,7 @@ from display import (
 )
 from game import Game
 from settings import load_settings, save_settings
+from sprites import bake_sprite
 from ui import render
 
 MOVE_KEYS = {
@@ -88,6 +90,7 @@ _USED_CODEPOINTS = (
     | set(range(0x2580, 0x25A0))  # блоки: █ ▓ ▒ ░ и их четверти
     | {ord(ch) for ch in "·—▲▼×"}
     | {ord(WALL_TORCH_CHAR)}  # спрайт «ниша с факелом»
+    | {ord(ch) for ch in SPRITE_CHARS.values()}  # предметы и враги
 )
 
 # Границы, чтобы окно нельзя было «уменьшить в ноль» и чтобы тайлсет
@@ -190,15 +193,20 @@ def _torch_sprite(
 
 
 def _add_overlay_glyphs(tileset: tcod.tileset.Tileset) -> tcod.tileset.Tileset:
-    """Добавить в тайлсет спрайт «ниша с факелом»."""
-    if 0x2593 not in tileset:
-        if ord("*") in tileset:  # запасной вариант: хотя бы звезда
-            tileset[ord(WALL_TORCH_CHAR)] = tileset[ord("*")]
-        return tileset
-    wall = np.array(tileset[0x2593], dtype=np.float32)
-    stone_mask = wall[:, :, 3] / 255.0
-    sprite = _torch_sprite(tileset.tile_width, tileset.tile_height, stone_mask)
-    tileset[ord(WALL_TORCH_CHAR)] = sprite.astype(np.uint8)
+    """Добавить в тайлсет нишу с факелом и спрайты предметов/врагов."""
+    if 0x2593 in tileset:
+        wall = np.array(tileset[0x2593], dtype=np.float32)
+        stone_mask = wall[:, :, 3] / 255.0
+        sprite = _torch_sprite(
+            tileset.tile_width, tileset.tile_height, stone_mask
+        )
+        tileset[ord(WALL_TORCH_CHAR)] = sprite.astype(np.uint8)
+    elif ord("*") in tileset:  # запасной вариант: хотя бы звезда
+        tileset[ord(WALL_TORCH_CHAR)] = tileset[ord("*")]
+    for name, ch in SPRITE_CHARS.items():
+        tileset[ord(ch)] = bake_sprite(
+            name, tileset.tile_width, tileset.tile_height
+        )
     return tileset
 
 
