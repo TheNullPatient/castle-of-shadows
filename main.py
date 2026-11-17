@@ -1192,6 +1192,12 @@ def main() -> None:
                         _enforce_auto_aspect(context, game, new_h)
                     except Exception as exc:  # pragma: no cover
                         print(f"Could not resize window: {exc}")
+                # В auto ширина зависит от фактического окна. После смены
+                # режима окно может не принять новый размер (например, в
+                # полноэкранном режиме), поэтому подгоняем консоль сразу,
+                # не дожидаясь события resize: иначе ширина зависела бы от
+                # того, в каком состоянии окно было до переключения.
+                console = _sync_auto_console(context, game, console)
                 needs_fit = True
                 settling = False
 
