@@ -453,6 +453,7 @@ def apply_state(game: Any, data: dict[str, Any]) -> None:
     game.run_recorded = False
     game.records_cache = []
     game.records_offset = 0
+    game.effects = []
     game.depth = int(data["depth"])
     game.player = entity_from_dict(data["player"])
     _restore_inventory(game, data.get("inventory", {}))

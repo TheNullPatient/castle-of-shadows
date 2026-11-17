@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from constants import (
+    DEFAULT_ANIMATIONS,
     DEFAULT_DISPLAY_MODE,
     DEFAULT_MAP_STYLE,
     DISPLAY_MODES,
@@ -19,6 +20,7 @@ def default_settings() -> dict:
     return {
         "display_mode": DEFAULT_DISPLAY_MODE,
         "map_style": DEFAULT_MAP_STYLE,
+        "animations": DEFAULT_ANIMATIONS,
     }
 
 
@@ -36,6 +38,13 @@ def normalize_map_style(style: object) -> str:
     return DEFAULT_MAP_STYLE
 
 
+def normalize_animations(value: object) -> bool:
+    """Анимации включены, если в файле явно записано true."""
+    if isinstance(value, bool):
+        return value
+    return DEFAULT_ANIMATIONS
+
+
 def load_settings() -> dict:
     """Прочитать settings.json, молча откатившись к значениям по умолчанию."""
     settings = default_settings()
@@ -48,6 +57,7 @@ def load_settings() -> dict:
             raw.get("display_mode")
         )
         settings["map_style"] = normalize_map_style(raw.get("map_style"))
+        settings["animations"] = normalize_animations(raw.get("animations"))
     return settings
 
 
@@ -63,6 +73,9 @@ def save_settings(settings: dict) -> bool:
     )
     data["map_style"] = normalize_map_style(
         settings.get("map_style", data["map_style"])
+    )
+    data["animations"] = normalize_animations(
+        settings.get("animations", data["animations"])
     )
     try:
         SETTINGS_PATH.write_text(

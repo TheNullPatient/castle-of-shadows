@@ -1061,6 +1061,7 @@ def main() -> None:
         build_level=False,
         display_mode=stored["display_mode"],
         map_style=stored["map_style"],
+        animations=stored["animations"],
     )
     screen_w, screen_h = game.screen_width(), game.screen_height()
     window_w, window_h = _window_pixels(game, screen_w, screen_h)
@@ -1108,6 +1109,7 @@ def main() -> None:
                         print(f"Could not resize font: {exc}")
                 needs_fit = False
 
+            game.prune_effects()
             render(console, game)
             # В auto консоль подстраивается под окно, поэтому её можно
             # растянуть на всю площадь. Пресеты сохраняют свои пропорции.
@@ -1131,6 +1133,11 @@ def main() -> None:
                     if timeout is None
                     else min(timeout, RESIZE_SETTLE_SECONDS)
                 )
+            # Пока живут вспышки, перерисовываем чаще, чтобы они успели
+            # проиграться, а не появились одним кадром.
+            if game.effects:
+                frame = 1.0 / 60.0
+                timeout = frame if timeout is None else min(timeout, frame)
             events = list(tcod.event.wait(timeout))
             now = time.monotonic()
             resized = False
@@ -1168,6 +1175,7 @@ def main() -> None:
                     {
                         "display_mode": game.display_mode,
                         "map_style": game.map_style,
+                        "animations": game.animations,
                     }
                 )
 

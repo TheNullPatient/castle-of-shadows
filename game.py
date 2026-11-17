@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import random
 import time
+from dataclasses import dataclass, field
 
 import numpy as np
 import tcod.map
@@ -12,6 +13,8 @@ from tcod.constants import FOV_SYMMETRIC_SHADOWCAST
 from constants import (
     AGGRO_RANGE,
     ALTAR_HEAL_RATIO,
+    ANIMATION_OFF,
+    ANIMATION_ORDER,
     ARMOR_WEAR_PER_HIT,
     AUTO_DISPLAY_MODE,
     BIOME_NAMES,
@@ -23,7 +26,14 @@ from constants import (
     CHEST_TRAP_CHANCE,
     CHEST_TRAP_MAX,
     CHEST_TRAP_PER_DEPTH,
+    COLOR_BG,
     COLOR_ENEMY,
+    COLOR_FX_DAMAGE,
+    COLOR_FX_FIRE,
+    COLOR_FX_HEAL,
+    COLOR_FX_HIT,
+    COLOR_FX_HURT,
+    COLOR_FX_LIGHTNING,
     COLOR_GOOD,
     COLOR_GOLD,
     COLOR_HP,
@@ -45,6 +55,9 @@ from constants import (
     MAP_H,
     MAP_STYLE_ORDER,
     MAP_STYLES,
+    SETTING_ANIMATIONS,
+    SETTING_DISPLAY,
+    SETTING_MAP_STYLE,
     MAP_W,
     MAX_DEPTH,
     MAX_ENEMIES,
@@ -201,6 +214,24 @@ class MessageLog:
         self.offset = max(0, min(max_offset, self.offset + delta))
 
 
+@dataclass
+class Effect:
+    """Короткая визуальная вспышка поверх карты.
+
+    Время хранится как момент старта: рендер сам считает возраст, поэтому
+    анимация не зависит от частоты кадров и не требует общего таймера.
+    ``fade`` использует только длительность, остальные виды — координаты.
+    """
+
+    kind: str
+    x: int
+    y: int
+    color: tuple[int, int, int]
+    text: str = ""
+    duration: float = 0.5
+    start: float = field(default_factory=time.monotonic)
+
+
 class Game:
     MENU_OPTIONS = ("New Game", "How to Play", "Records", "Settings", "Quit")
     PAUSE_OPTIONS = (
@@ -220,6 +251,7 @@ class Game:
         auto_width: int | None = None,
         seed: str | None = None,
         map_style: str = DEFAULT_MAP_STYLE,
+        animations: bool = True,
     ) -> None:
         self.mode = MODE_MENU
         self.menu_index = 0
@@ -247,6 +279,7 @@ class Game:
         if map_style not in MAP_STYLES:
             map_style = DEFAULT_MAP_STYLE
         self.map_style = map_style
+        self.animations = bool(animations)
         self.settings_dirty = False
         self.settings_index = DISPLAY_MODE_ORDER.index(display_mode)
         self.settings_return_mode = MODE_MENU
@@ -288,6 +321,7 @@ class Game:
         self.poison_damage = POISON_DAMAGE
         self.enemies: list[Entity] = []
         self.items: list[Item] = []
+        self.effects: list[Effect] = []
         self.trash_pos: tuple[int, int] | None = None
         self.trash_items: list[Item] = []
         self.trash_noticed = False
@@ -522,9 +556,10 @@ class Game:
             self.mode = self.settings_return_mode
 
     def settings_entries(self) -> list[tuple[str, str]]:
-        """Пункты настроек: режимы отображения, затем стиль карты."""
-        entries = [("display", mode) for mode in DISPLAY_MODE_ORDER]
-        entries += [("map_style", style) for style in MAP_STYLE_ORDER]
+        """Пункты настроек: режим окна, стиль карты и анимации."""
+        entries = [(SETTING_DISPLAY, mode) for mode in DISPLAY_MODE_ORDER]
+        entries += [(SETTING_MAP_STYLE, style) for style in MAP_STYLE_ORDER]
+        entries += [(SETTING_ANIMATIONS, value) for value in ANIMATION_ORDER]
         return entries
 
     def selected_setting(self) -> tuple[str, str]:
@@ -537,16 +572,29 @@ class Game:
         ) % len(self.settings_entries())
 
     def apply_settings_selection(self) -> bool:
-        """Применить выбранный пункт: режим окна или стиль карты."""
+        """Применить выбранный пункт настроек."""
         kind, value = self.selected_setting()
-        if kind == "map_style":
+        if kind == SETTING_MAP_STYLE:
             return self.set_map_style(value)
+        if kind == SETTING_ANIMATIONS:
+            return self.set_animations(value != ANIMATION_OFF)
         if value == self.display_mode == AUTO_DISPLAY_MODE:
             self.refresh_auto_width()
             self.display_changed = True
             self.settings_dirty = True
             return True
         return self.set_display_mode(value)
+
+    def set_animations(self, enabled: bool) -> bool:
+        """Включить или выключить вспышки, числа, искры и спуск."""
+        enabled = bool(enabled)
+        if enabled == self.animations:
+            return False
+        self.animations = enabled
+        if not enabled:
+            self.effects.clear()
+        self.settings_dirty = True
+        return True
 
     def set_map_style(self, style: str) -> bool:
         """Сменить стиль карты; меняется сразу, без пересоздания окна."""
@@ -746,6 +794,7 @@ class Game:
         # начинается с детерминированного зерна, а бой дальше использует
         # обычный поток random.
         random.seed(floor_seed(self.seed, self.depth))
+        self.effects.clear()
         if not first:
             self._expire_maps()
         width, height = self.level_dimensions()
@@ -1496,6 +1545,10 @@ class Game:
                 "The altar grants you a sliver of life (+1 max HP).",
                 "good",
             )
+        if cured and not healed:
+            self.add_effect(
+                "spark", self.player.x, self.player.y, COLOR_FX_HEAL
+            )
         self.player_acted()
         return True
 
@@ -1883,6 +1936,41 @@ class Game:
                 if self.dungeon.grid[ny][nx] == "#":
                     self.visible[nx, ny] = True
 
+    # --- короткие эффекты боя -------------------------------------------
+
+    def add_effect(
+        self,
+        kind: str,
+        x: int,
+        y: int,
+        color: tuple[int, int, int],
+        text: str = "",
+        duration: float = 0.45,
+    ) -> None:
+        if not self.animations:
+            return
+        self.effects.append(
+            Effect(
+                kind=kind,
+                x=x,
+                y=y,
+                color=color,
+                text=text,
+                duration=duration,
+            )
+        )
+
+    def prune_effects(self) -> bool:
+        """Убрать отыгравшие вспышки и сказать, остались ли живые."""
+        if self.effects:
+            now = time.monotonic()
+            self.effects = [
+                effect
+                for effect in self.effects
+                if now - effect.start < effect.duration
+            ]
+        return bool(self.effects)
+
     def attack(self, attacker: Entity, defender: Entity) -> None:
         if attacker is self.player:
             self.player_attack_events += 1
@@ -1893,6 +1981,15 @@ class Game:
             before = defender.hp
             defender.hp -= dmg
             self.damage_dealt += min(dmg, max(0, before))
+            self.add_effect("flash", defender.x, defender.y, COLOR_FX_HIT)
+            self.add_effect(
+                "number",
+                defender.x,
+                defender.y,
+                COLOR_FX_DAMAGE,
+                f"-{dmg}",
+                duration=0.55,
+            )
             self.msg(f"You hit {defender.name} for {dmg}.")
             wear = ENEMY_GEAR_WEAR.get(
                 defender.name,
@@ -2051,6 +2148,15 @@ class Game:
         before = target.hp
         target.hp -= dmg
         self.damage_dealt += min(dmg, max(0, before))
+        self.add_effect("flash", target.x, target.y, COLOR_FX_HIT)
+        self.add_effect(
+            "number",
+            target.x,
+            target.y,
+            COLOR_FX_DAMAGE,
+            f"-{dmg}",
+            duration=0.55,
+        )
         self.msg(f"Your arrow hits {target.name} for {dmg}.")
         wear = ENEMY_GEAR_WEAR.get(
             target.name,
@@ -2089,6 +2195,9 @@ class Game:
         if enemy not in self.enemies:
             return
         self.enemies.remove(enemy)
+        self.add_effect(
+            "spark", enemy.x, enemy.y, enemy.color, duration=0.5
+        )
         self.kills += 1
         self.player_xp += enemy.xp
         self.msg(f"{enemy.name} dies! (+{enemy.xp} XP)")
@@ -2132,6 +2241,15 @@ class Game:
         before = self.player.hp
         self.player.hp -= dmg
         self.damage_taken += min(dmg, max(0, before))
+        self.add_effect("flash", self.player.x, self.player.y, COLOR_FX_HURT)
+        self.add_effect(
+            "number",
+            self.player.x,
+            self.player.y,
+            COLOR_FX_DAMAGE,
+            f"-{dmg}",
+            duration=0.55,
+        )
         if wear_armor:
             amount = ARMOR_WEAR_PER_HIT
             if attacker is not None:
@@ -2244,7 +2362,20 @@ class Game:
             return 0
         before = self.player.hp
         self.player.hp = min(self.player.max_hp, self.player.hp + amount)
-        return self.player.hp - before
+        healed = self.player.hp - before
+        if healed > 0:
+            self.add_effect(
+                "flash", self.player.x, self.player.y, COLOR_FX_HEAL
+            )
+            self.add_effect(
+                "number",
+                self.player.x,
+                self.player.y,
+                COLOR_FX_HEAL,
+                f"+{healed}",
+                duration=0.6,
+            )
+        return healed
 
     def _check_level_up(self) -> None:
         while self.player_xp >= self.xp_next:
@@ -2337,6 +2468,7 @@ class Game:
     def pickup(self, item: Item) -> None:
         if item.kind == "gold":
             self.gold += item.value
+            self.add_effect("spark", item.x, item.y, COLOR_GOLD)
             self.msg(f"You found {item.value} gold.", "gold")
             self.items.remove(item)
             return
@@ -2344,6 +2476,7 @@ class Game:
             self.msg("Your pack is full.", "warn")
             return
         self.items.remove(item)
+        self.add_effect("spark", item.x, item.y, item.color)
         self.msg(f"You pick up {item.name}.", "item")
 
     def use_inventory(self, index: int) -> bool:
@@ -2496,6 +2629,15 @@ class Game:
             before = e.hp
             e.hp -= damage
             self.damage_dealt += min(damage, max(0, before))
+            self.add_effect("flash", e.x, e.y, COLOR_FX_FIRE)
+            self.add_effect(
+                "number",
+                e.x,
+                e.y,
+                COLOR_FX_FIRE,
+                f"-{damage}",
+                duration=0.55,
+            )
             hits += 1
             self.msg(f"Fire burns {e.name} for {damage}.", "warn")
             if not e.alive():
@@ -2516,6 +2658,15 @@ class Game:
         before = target.hp
         target.hp -= damage
         self.damage_dealt += min(damage, max(0, before))
+        self.add_effect("flash", target.x, target.y, COLOR_FX_LIGHTNING)
+        self.add_effect(
+            "number",
+            target.x,
+            target.y,
+            COLOR_FX_LIGHTNING,
+            f"-{damage}",
+            duration=0.55,
+        )
         self.msg(f"Lightning strikes {target.name} for {damage}!", "warn")
         if not target.alive():
             self._kill_enemy(target)
@@ -2683,6 +2834,7 @@ class Game:
         self.depth += 1
         self.msg(f"You descend to depth {self.depth}.")
         self.new_level()
+        self.add_effect("fade", -1, -1, COLOR_BG, duration=0.55)
         self.save()
 
     def run_summary(self) -> dict:

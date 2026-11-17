@@ -76,6 +76,33 @@ MAP_STYLES = {
 }
 DEFAULT_MAP_STYLE = MAP_STYLE_RELIEF
 
+# Экран настроек сгруппирован по разделам: пункты одного раздела идут под
+# общим заголовком, поэтому новые настройки достаточно добавить в свой раздел.
+SETTING_DISPLAY = "display"
+SETTING_MAP_STYLE = "map_style"
+SETTING_ANIMATIONS = "animations"
+SETTING_GROUPS = {
+    SETTING_DISPLAY: "Display",
+    SETTING_MAP_STYLE: "Map",
+    SETTING_ANIMATIONS: "Effects",
+}
+
+# Анимации событий: вспышки, числа, искры и проявление этажа при спуске.
+ANIMATION_ON = "on"
+ANIMATION_OFF = "off"
+ANIMATION_ORDER = (ANIMATION_ON, ANIMATION_OFF)
+ANIMATIONS = {
+    ANIMATION_ON: {
+        "label": "On",
+        "note": "flashes, numbers, sparks",
+    },
+    ANIMATION_OFF: {
+        "label": "Off",
+        "note": "static map, no extra flashes",
+    },
+}
+DEFAULT_ANIMATIONS = True
+
 FOV_RADIUS = 11  # радиус обзора; стены на краю подсвечиваются отдельно
 MAX_DEPTH = 25
 
@@ -281,6 +308,13 @@ COLOR_ALTAR = (150, 235, 255)
 COLOR_SHRINE_FLOOR = (66, 92, 118)
 COLOR_AIM = (255, 240, 150)
 COLOR_AIM_TARGET = (255, 100, 90)
+# Вспышки и всплывающие числа боя.
+COLOR_FX_HIT = (255, 226, 180)
+COLOR_FX_HURT = (255, 80, 70)
+COLOR_FX_DAMAGE = (255, 120, 95)
+COLOR_FX_HEAL = (140, 255, 165)
+COLOR_FX_FIRE = (255, 150, 60)
+COLOR_FX_LIGHTNING = (175, 220, 255)
 COLOR_VAULT_FLOOR = (108, 98, 70)
 COLOR_GUARDED_FLOOR = (104, 72, 72)
 COLOR_CAMP_FLOOR = (78, 104, 82)

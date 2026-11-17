@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import math
+import time
 from datetime import datetime
+from typing import Callable
 
+import numpy as np
 import tcod.console
 
 from constants import (
     AIM_PATH_CHAR,
     AIM_TARGET_CHAR,
     ALTAR_CHAR,
+    ANIMATION_ON,
+    ANIMATIONS,
     AUTO_DISPLAY_MODE,
     CHEST_CAPACITY,
     CHEST_CHAR,
@@ -49,15 +54,17 @@ from constants import (
     COLOR_VAULT_FLOOR,
     COLOR_WARN,
     COLOR_XP,
-    DISPLAY_MODE_ORDER,
     DISPLAY_MODES,
     FOV_RADIUS,
     HINT_Y,
     LOG_H,
     LOG_Y,
     MAP_STYLE_CLASSIC,
-    MAP_STYLE_ORDER,
     MAP_STYLES,
+    SETTING_ANIMATIONS,
+    SETTING_DISPLAY,
+    SETTING_GROUPS,
+    SETTING_MAP_STYLE,
     MAP_Y,
     MAX_DEPTH,
     MERCHANT_CHAR,
@@ -88,7 +95,7 @@ from constants import (
     TORCH_STONE,
     WALL_TORCH_CHAR,
 )
-from game import MSG_COLORS, Game
+from game import MSG_COLORS, Effect, Game
 from records import format_duration
 from sprites import enemy_sprite_key, item_sprite_key
 
@@ -132,6 +139,19 @@ def _put(console: tcod.console.Console, x: int, y: int, ch: str, fg, bg=COLOR_BG
 
 def _tint(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
     return tuple(max(0, min(255, int(channel * factor))) for channel in color)  # type: ignore[return-value]
+
+
+def _mix(
+    a: tuple[int, int, int] | np.ndarray,
+    b: tuple[int, int, int],
+    t: float,
+) -> tuple[int, int, int]:
+    """Смешать два цвета: t=0 — первый, t=1 — второй."""
+    t = max(0.0, min(1.0, t))
+    first = tuple(int(v) for v in a[:3])
+    return tuple(
+        int(round(first[i] + (b[i] - first[i]) * t)) for i in range(3)
+    )  # type: ignore[return-value]
 
 
 def _light(game: Game, x: int, y: int) -> float:
@@ -341,6 +361,7 @@ def render(console: tcod.console.Console, game: Game) -> None:
     _render_status(console, game)
     _render_log(console, game)
     _render_hint(console, game)
+    _render_effects(console, game)
     if game.mode == "inventory":
         _render_inventory(console, game)
     elif game.mode == "trash":
@@ -778,6 +799,183 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
         _sprite_glyph(game, "player", "@"),
         COLOR_PLAYER,
     )
+
+
+def _graphic_index(
+    console: tcod.console.Console, x: int, y: int
+) -> tuple[int, int]:
+    """Индексы для прямого доступа к ``console.fg``/``console.bg``.
+
+    tcod раскладывает массивы по-разному: при ``order="F"`` (так консоль
+    создаётся в ``main.py``) оси идут как ``(width, height)``, иначе —
+    ``(height, width)``. Путать их нельзя: запись выйдет за границы.
+    """
+    width, height = console.width, console.height
+    if console.fg.shape[0] == width and console.fg.shape[1] == height:
+        return x, y
+    return y, x
+
+
+def _fx_floor(game: Game, x: int, y: int) -> bool:
+    """Можно ли рисовать эффект в этой клетке, не продырявив стену."""
+    dungeon = game.dungeon
+    if not dungeon.in_bounds(x, y):
+        return False
+    if dungeon.grid[y][x] == "#":
+        return False
+    return game.is_visible(x, y) or game.is_explored(x, y)
+
+
+def _number_spot(
+    game: Game,
+    effect: Effect,
+    rise: int,
+    blocked: set[tuple[int, int]],
+    screen_cell: Callable[[int, int], bool],
+) -> tuple[str, int, int] | None:
+    """Найти место для числа целиком на полу и в пределах экрана.
+
+    Числа всплывают над целью, но в узких коридорах верхние клетки — стены.
+    Печатать там цифры значит стирать тайл и оставлять «дырку», поэтому
+    перебираем строки и выравнивания, а в крайнем случае оставляем только
+    цифру без знака (цвет уже говорит, урон это или лечение). ``blocked``
+    не даёт числам налезать друг на друга и на героя; клетка самой цели —
+    последний вариант, когда больше места нет.
+    """
+    texts = [effect.text]
+    if effect.text[:1] in "+-" and len(effect.text) > 1:
+        texts.append(effect.text[1:])
+    # Урон герою показываем под ним, урон врагу — над ним: так числа не
+    # сливаются в одну строку, когда противники стоят рядом.
+    player = game.player
+    under_player = player is not None and (effect.x, effect.y) == (
+        player.x,
+        player.y,
+    )
+    if under_player:
+        candidates = (effect.y + 1, effect.y - 1, effect.y)
+    else:
+        candidates = (effect.y - 1 - rise, effect.y - 1, effect.y + 1, effect.y)
+    rows: list[int] = []
+    for row in candidates:
+        if row not in rows:
+            rows.append(row)
+    own = (effect.x, effect.y)
+    starts: list[int] = []
+    for offset in (0, -1, 1, -2, 2, -3, 3):
+        start = effect.x - (len(effect.text) - 1) // 2 + offset
+        if start not in starts:
+            starts.append(start)
+
+    def attempt(allow_own: bool) -> tuple[str, int, int] | None:
+        for text in texts:
+            width = len(text)
+            for wy in rows:
+                for start in starts:
+                    cells = [(wx, wy) for wx in range(start, start + width)]
+                    if not all(
+                        _fx_floor(game, wx, wy) and screen_cell(wx, wy)
+                        for wx, wy in cells
+                    ):
+                        continue
+                    if any(
+                        cell in blocked and (cell != own or not allow_own)
+                        for cell in cells
+                    ):
+                        continue
+                    blocked.update(cells)
+                    return text, start, wy
+        return None
+
+    return attempt(False) or attempt(True)
+
+
+def _render_effects(
+    console: tcod.console.Console,
+    game: Game,
+) -> None:
+    """Короткие вспышки, всплывающие числа и искры поверх карты."""
+    if not game.effects:
+        return
+    now = time.monotonic()
+    left, top = game.camera()
+    width, height = console.width, console.height
+    map_top = MAP_Y
+    map_bottom = min(height, MAP_Y + game.view_height())
+
+    def on_map(x: int, y: int) -> bool:
+        return 0 <= x < width and map_top <= y < map_bottom
+
+    # Числа не должны закрывать героя, врагов и друг друга.
+    blocked: set[tuple[int, int]] = set()
+    if game.player is not None:
+        blocked.add((game.player.x, game.player.y))
+    blocked.update((enemy.x, enemy.y) for enemy in game.enemies)
+
+    def screen_cell(wx: int, wy: int) -> bool:
+        return on_map(wx - left, MAP_Y + wy - top)
+
+    # Порядок отрисовки: сначала фон, потом искры, числа поверх них.
+    order = {"fade": 0, "flash": 1, "spark": 2, "number": 3}
+    for effect in sorted(
+        game.effects, key=lambda item: order.get(item.kind, 4)
+    ):
+        progress = min(
+            1.0,
+            max(0.0, (now - effect.start) / max(effect.duration, 1e-6)),
+        )
+        if effect.kind == "fade":
+            # Спуск: новый этаж проявляется из темноты.
+            factor = progress
+            console.fg[:] = (
+                console.fg.astype(np.float32) * factor
+            ).astype(np.uint8)
+            console.bg[:] = (
+                console.bg.astype(np.float32) * factor
+            ).astype(np.uint8)
+            continue
+
+        sx = effect.x - left
+        sy = MAP_Y + effect.y - top
+        if not on_map(sx, sy):
+            continue
+
+        if effect.kind == "flash":
+            strength = (1.0 - progress) ** 1.6 * 0.9
+            cell = _graphic_index(console, sx, sy)
+            console.fg[cell] = _mix(console.fg[cell], effect.color, strength)
+            console.bg[cell] = _mix(
+                console.bg[cell], effect.color, strength * 0.45
+            )
+        elif effect.kind == "number":
+            rise = int(progress * 2.5)
+            spot = _number_spot(game, effect, rise, blocked, screen_cell)
+            if spot is None:
+                continue
+            text, start, wy = spot
+            xx = start - left
+            yy = MAP_Y + wy - top
+            if on_map(xx, yy) and on_map(xx + len(text) - 1, yy):
+                fg = _tint(effect.color, 1.0 - 0.55 * progress)
+                console.print(xx, yy, text, fg=fg)
+        elif effect.kind == "spark":
+            radius = 0.35 + progress * 1.0
+            fade = max(0.0, 1.0 - progress * 1.1)
+            fg = _tint(effect.color, fade)
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                px = int(round(sx + dx * radius))
+                py = int(round(sy + dy * radius * 0.8))
+                if not on_map(px, py):
+                    continue
+                cell = (px + left, py - MAP_Y + top)
+                if game.player is not None and cell == (
+                    game.player.x,
+                    game.player.y,
+                ):
+                    continue
+                if not _fx_floor(game, *cell):
+                    continue
+                console.print(px, py, "*", fg=fg)
 
 
 def _print_segments(
@@ -1501,14 +1699,60 @@ def _render_slots(console: tcod.console.Console, game: Game) -> None:
     )
 
 
+def _setting_option_text(game: Game, kind: str, value: str) -> str:
+    """Строка одного пункта настроек: название, значение и пометка."""
+    if kind == SETTING_DISPLAY:
+        info = DISPLAY_MODES[value]
+        cols = game.auto_width if value == AUTO_DISPLAY_MODE else info["width"]
+        return f"{info['label']:<14} {cols:>3} cols  {info['note']}"
+    if kind == SETTING_MAP_STYLE:
+        info = MAP_STYLES[value]
+        return f"{info['label']:<14} {info['note']}"
+    info = ANIMATIONS[value]
+    return f"{info['label']:<14} {info['note']}"
+
+
+def _setting_is_current(game: Game, kind: str, value: str) -> bool:
+    if kind == SETTING_DISPLAY:
+        return value == game.display_mode
+    if kind == SETTING_MAP_STYLE:
+        return value == game.map_style
+    return (value == ANIMATION_ON) == game.animations
+
+
 def _render_settings(console: tcod.console.Console, game: Game) -> None:
-    """Экран настроек: режим окна и стиль карты (главное меню и пауза)."""
+    """Экран настроек с разделами: отображение, карта, эффекты."""
     console.clear(fg=COLOR_UI, bg=COLOR_BG)
     screen_w, screen_h = game.screen_width(), game.screen_height()
     width = min(screen_w - 4, 78)
-    display_rows = len(DISPLAY_MODE_ORDER) * 2
-    style_rows = len(MAP_STYLE_ORDER) * 2
-    height = display_rows + style_rows + 10
+
+    entries = game.settings_entries()
+    selected = game.settings_index % max(1, len(entries))
+    lines: list[tuple[str, str]] = []
+    last_group = ""
+    for index, (kind, value) in enumerate(entries):
+        group = SETTING_GROUPS.get(kind, "Other")
+        if group != last_group:
+            if lines:
+                lines.append(("", COLOR_DIM))
+            lines.append((f"── {group} ──", COLOR_DIM))
+            last_group = group
+        marker = ">" if index == selected else " "
+        current = " *" if _setting_is_current(game, kind, value) else ""
+        text = f"{marker} {_setting_option_text(game, kind, value)}{current}"
+        lines.append(
+            (
+                text[: width - 4],
+                COLOR_GOLD if index == selected else COLOR_UI,
+            )
+        )
+
+    footer = (
+        "Display, map style and effects are visual only.",
+        "Rules stay the same; changes are saved for next launch.",
+        "W/S select · Enter apply · Esc back",
+    )
+    height = len(lines) + 6
     x0 = max(1, (screen_w - width) // 2)
     y0 = max(1, (screen_h - height) // 2)
     console.draw_frame(
@@ -1521,83 +1765,24 @@ def _render_settings(console: tcod.console.Console, game: Game) -> None:
         bg=COLOR_BG,
         clear=True,
     )
-    console.print(
-        x0 + 2,
-        y0 + 1,
-        "Display mode"[: width - 4],
-        fg=COLOR_UI,
-        bg=COLOR_BG,
-    )
-    console.print(
-        x0 + 2,
-        y0 + 2,
-        f"Current: {game.display_label()}"[: width - 4],
-        fg=COLOR_DIM,
-        bg=COLOR_BG,
-    )
-    start_y = y0 + 4
-    for i, mode in enumerate(DISPLAY_MODE_ORDER):
-        selected = i == game.settings_index
-        info = DISPLAY_MODES[mode]
-        marker = ">" if selected else " "
-        current = " *" if mode == game.display_mode else ""
-        cols = game.auto_width if mode == AUTO_DISPLAY_MODE else info["width"]
-        text = (
-            f"{marker} {info['label']:<14} {cols:>3} cols"
-            f"  {info['note']}{current}"
-        )
+    for offset, (text, fg) in enumerate(lines):
+        if not text:
+            continue
         console.print(
             x0 + 2,
-            start_y + i * 2,
-            text[: width - 4],
-            fg=COLOR_GOLD if selected else COLOR_UI,
+            y0 + 1 + offset,
+            text,
+            fg=fg,
             bg=COLOR_BG,
         )
-    style_title_y = start_y + display_rows + 1
-    console.print(
-        x0 + 2,
-        style_title_y,
-        "Map style"[: width - 4],
-        fg=COLOR_UI,
-        bg=COLOR_BG,
-    )
-    style_start_y = style_title_y + 1
-    for j, style in enumerate(MAP_STYLE_ORDER):
-        selected = len(DISPLAY_MODE_ORDER) + j == game.settings_index
-        info = MAP_STYLES[style]
-        marker = ">" if selected else " "
-        current = " *" if style == game.map_style else ""
-        text = f"{marker} {info['label']:<14} {info['note']}{current}"
+    for offset, text in enumerate(footer):
         console.print(
             x0 + 2,
-            style_start_y + j * 2,
+            y0 + height - 4 + offset,
             text[: width - 4],
-            fg=COLOR_GOLD if selected else COLOR_UI,
+            fg=COLOR_DIM,
             bg=COLOR_BG,
         )
-    console.print(
-        x0 + 2,
-        y0 + height - 4,
-        "Map style is visual only: layout and rules stay the same."[
-            : width - 4
-        ],
-        fg=COLOR_DIM,
-        bg=COLOR_BG,
-    )
-    console.print(
-        x0 + 2,
-        y0 + height - 3,
-        "The choice is saved for the next launch."[: width - 4],
-        fg=COLOR_DIM,
-        bg=COLOR_BG,
-    )
-    console.print(
-        x0 + 2,
-        y0 + height - 2,
-        "W/S select · Enter apply · Esc back"[: width - 4],
-        fg=COLOR_DIM,
-        bg=COLOR_BG,
-    )
 
 
 def _render_pause(console: tcod.console.Console, game: Game) -> None:
