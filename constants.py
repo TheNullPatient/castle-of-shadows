@@ -238,6 +238,14 @@ SPRITE_CHARS = {
     "boss_wyvern": "\ue02c",
     "boss_lich": "\ue02d",
     "boss_shadow_lord": "\ue02e",
+    "player": "\ue030",
+    "obj_chest": "\ue031",
+    "obj_merchant": "\ue032",
+    "obj_altar": "\ue033",
+    "obj_trap": "\ue034",
+    "obj_trap_spent": "\ue035",
+    "obj_stairs": "\ue036",
+    "obj_spawn": "\ue037",
 }
 
 # Палитра запечённого спрайта факела. Камень здесь не белый, как у обычного

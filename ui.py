@@ -504,6 +504,7 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     else:
                         fg = _tint(wall_color, light)
                 elif ch == ">":
+                    ch = _sprite_glyph(game, "obj_stairs", ">")
                     fg = _tint(COLOR_STAIRS, 0.75 + light * 0.25)
                     bg = _tint(COLOR_STAIRS, 0.10)
                 elif ch == SECRET_DOOR_CHAR:
@@ -536,6 +537,7 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
                     else:
                         fg = _tint(wall_color, 0.28)
                 elif ch == ">":
+                    ch = _sprite_glyph(game, "obj_stairs", ">")
                     fg = (40, 90, 55)
                 elif ch == SECRET_DOOR_CHAR:
                     fg = _tint(COLOR_SECRET_DOOR, 0.28)
@@ -712,23 +714,33 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
                 if game.is_visible(spawn[0], spawn[1])
                 else _tint(COLOR_SPAWN, 0.55)
             )
-            put(sx, sy, "<", color)
+            put(sx, sy, _sprite_glyph(game, "obj_spawn", "<"), color)
     for chest in game.chests:
         if game.is_visible(chest.x, chest.y):
             color = COLOR_CHEST_GUARDED if chest.guarded else COLOR_CHEST
-            put(chest.x - left, chest.y - top, CHEST_CHAR, color)
+            put(
+                chest.x - left,
+                chest.y - top,
+                _sprite_glyph(game, "obj_chest", CHEST_CHAR),
+                color,
+            )
     merchant = game.merchant_pos
     if merchant is not None and game.is_visible(merchant[0], merchant[1]):
         put(
             merchant[0] - left,
             merchant[1] - top,
-            MERCHANT_CHAR,
+            _sprite_glyph(game, "obj_merchant", MERCHANT_CHAR),
             COLOR_MERCHANT,
         )
     altar = game.altar_pos
     if altar is not None and game.is_visible(altar[0], altar[1]):
         color = COLOR_ALTAR if not game.altar_used else COLOR_DIM
-        put(altar[0] - left, altar[1] - top, ALTAR_CHAR, color)
+        put(
+            altar[0] - left,
+            altar[1] - top,
+            _sprite_glyph(game, "obj_altar", ALTAR_CHAR),
+            color,
+        )
     for item in game.items:
         if game.is_visible(item.x, item.y):
             put(
@@ -744,7 +756,8 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
             color = COLOR_TRAP if trap.armed else COLOR_TRAP_SPENT
         else:
             color = _tint(COLOR_TRAP_SPENT, 0.55)
-        put(trap.x - left, trap.y - top, TRAP_CHAR, color)
+        key = "obj_trap" if trap.armed else "obj_trap_spent"
+        put(trap.x - left, trap.y - top, _sprite_glyph(game, key, TRAP_CHAR), color)
     for enemy in game.enemies:
         if not game.is_visible(enemy.x, enemy.y):
             continue
@@ -759,7 +772,12 @@ def _render_entities(console: tcod.console.Console, game: Game) -> None:
             color,
         )
     player = game.player
-    put(player.x - left, player.y - top, "@", COLOR_PLAYER)
+    put(
+        player.x - left,
+        player.y - top,
+        _sprite_glyph(game, "player", "@"),
+        COLOR_PLAYER,
+    )
 
 
 def _print_segments(
