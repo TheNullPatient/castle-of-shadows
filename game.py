@@ -19,8 +19,11 @@ from constants import (
     AUTO_DISPLAY_MODE,
     BIOME_NAMES,
     biome_index,
+    BOLT_DURATION,
     BOSS_HEAL_MIN,
     BOSS_HEAL_RATIO,
+    BURST_DURATION,
+    BURST_STAGGER,
     CHEST_CAPACITY,
     CHEST_TRAP_BONUS_GUARDED,
     CHEST_TRAP_CHANCE,
@@ -28,6 +31,7 @@ from constants import (
     CHEST_TRAP_PER_DEPTH,
     COLOR_BG,
     COLOR_ENEMY,
+    COLOR_FX_ARROW,
     COLOR_FX_DAMAGE,
     COLOR_FX_FIRE,
     COLOR_FX_HEAL,
@@ -82,6 +86,9 @@ from constants import (
     POISON_PER_DEPTH,
     POISON_TURNS,
     PLAYER_RANGED_RANGE,
+    PROJECTILE_MAX_TIME,
+    PROJECTILE_MIN_TIME,
+    PROJECTILE_STEP_TIME,
     REPAIR_COST_DIVISOR,
     RUN_MODE_AVAILABLE,
     RUN_MODE_CLASSIC,
@@ -221,6 +228,8 @@ class Effect:
     Время хранится как момент старта: рендер сам считает возраст, поэтому
     анимация не зависит от частоты кадров и не требует общего таймера.
     ``fade`` использует только длительность, остальные виды — координаты.
+    ``path`` нужен снарядам и молнии, ``delay`` откладывает удар до того
+    момента, когда снаряд долетит. Эффекты не сохраняются в сейве.
     """
 
     kind: str
@@ -230,6 +239,21 @@ class Effect:
     text: str = ""
     duration: float = 0.5
     start: float = field(default_factory=time.monotonic)
+    delay: float = 0.0
+    path: tuple[tuple[int, int], ...] = ()
+    glyph: str = ""
+    radius: int = 0
+
+
+@dataclass
+class PendingShot:
+    """Выстрел, который ещё летит: урон и ход разрешатся при попадании."""
+
+    target: Entity | None
+    weapon: Item
+    impact: tuple[int, int]
+    obstacle: str | None
+    obstacle_cell: tuple[int, int] | None
 
 
 class Game:
@@ -322,6 +346,8 @@ class Game:
         self.enemies: list[Entity] = []
         self.items: list[Item] = []
         self.effects: list[Effect] = []
+        self.pending_shot: PendingShot | None = None
+        self.pending_turn_at: float | None = None
         self.trash_pos: tuple[int, int] | None = None
         self.trash_items: list[Item] = []
         self.trash_noticed = False
@@ -701,11 +727,15 @@ class Game:
         delete_save(slot)
         run_mode = self.new_run_mode
         display_mode = self.display_mode
+        map_style = self.map_style
+        animations = self.animations
         seed = self.new_seed or generate_seed()
         self.__init__(
             run_mode=run_mode,
             display_mode=display_mode,
             seed=seed,
+            map_style=map_style,
+            animations=animations,
         )
         self.slot = slot
         self.mode = MODE_PLAYING
@@ -795,6 +825,8 @@ class Game:
         # обычный поток random.
         random.seed(floor_seed(self.seed, self.depth))
         self.effects.clear()
+        self.pending_shot = None
+        self.pending_turn_at = None
         if not first:
             self._expire_maps()
         width, height = self.level_dimensions()
@@ -1946,6 +1978,11 @@ class Game:
         color: tuple[int, int, int],
         text: str = "",
         duration: float = 0.45,
+        *,
+        delay: float = 0.0,
+        path: tuple[tuple[int, int], ...] = (),
+        glyph: str = "",
+        radius: int = 0,
     ) -> None:
         if not self.animations:
             return
@@ -1957,6 +1994,10 @@ class Game:
                 color=color,
                 text=text,
                 duration=duration,
+                delay=max(0.0, delay),
+                path=path,
+                glyph=glyph,
+                radius=radius,
             )
         )
 
@@ -1967,7 +2008,7 @@ class Game:
             self.effects = [
                 effect
                 for effect in self.effects
-                if now - effect.start < effect.duration
+                if now - effect.start < effect.delay + effect.duration
             ]
         return bool(self.effects)
 
@@ -2078,6 +2119,70 @@ class Game:
             or (x, y) == self.trash_pos
         )
 
+    @staticmethod
+    def _shot_glyph(dx: int, dy: int) -> str:
+        """Символ стрелы по направлению полёта."""
+        if dx and dy:
+            return "/" if dx * dy < 0 else "\\"
+        return "-" if dx else "|"
+
+    @staticmethod
+    def _flight_time(steps: int) -> float:
+        """Сколько лететь снаряду: короткий выстрел не должен мигать."""
+        return max(
+            PROJECTILE_MIN_TIME,
+            min(PROJECTILE_MAX_TIME, PROJECTILE_STEP_TIME * steps),
+        )
+
+    def _obstacle_at(self, x: int, y: int) -> str | None:
+        """Что мешает стреле войти в клетку: стена или крупный объект."""
+        if not self.dungeon.in_bounds(x, y):
+            return None
+        if not self.walkable(x, y):
+            return "wall"
+        if self._shot_blocked(x, y):
+            return "solid"
+        return None
+
+    def _shot_obstacle(self, path: list[tuple[int, int]]) -> str | None:
+        """Во что упёрлась стрела после последней клетки луча."""
+        if not path:
+            return None
+        x, y = path[-1]
+        return self._obstacle_at(x + self.aim_dx, y + self.aim_dy)
+
+    @staticmethod
+    def _miss_message(obstacle: str | None) -> str:
+        if obstacle == "wall":
+            return "Your arrow clatters off the wall."
+        if obstacle == "solid":
+            return "Your arrow thuds into something solid."
+        return "Your arrow vanishes into the dark."
+
+    def _line_path(
+        self, x0: int, y0: int, x1: int, y1: int
+    ) -> list[tuple[int, int]]:
+        """Клетки прямой между двумя точками (для росчерка молнии)."""
+        cells: list[tuple[int, int]] = []
+        dx = abs(x1 - x0)
+        dy = -abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx + dy
+        x, y = x0, y0
+        while True:
+            cells.append((x, y))
+            if x == x1 and y == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                x += sx
+            if e2 <= dx:
+                err += dx
+                y += sy
+        return cells
+
     def aim_path(self) -> tuple[list[tuple[int, int]], Entity | None]:
         """Клетки луча до первой преграды и враг, если он на линии."""
         if self.player is None:
@@ -2112,23 +2217,95 @@ class Game:
         }
 
     def fire_aimed(self) -> bool:
-        """Выстрелить в выбранном направлении и выйти из прицела."""
-        if self.game_over or self.player is None:
+        """Выстрелить в выбранном направлении и выйти из прицела.
+
+        Когда анимации включены, выстрел сначала летит по клеткам луча,
+        а урон и ход врагов разрешаются в момент попадания. Без анимаций
+        поведение мгновенное, как раньше.
+        """
+        if self.game_over or self.player is None or self.pending_shot:
             return False
         weapon = self.inventory.weapon
         if weapon is None or weapon.effect != "ranged":
             self.mode = MODE_PLAYING
             self.msg("Equip a bow to shoot at range.", "warn")
             return False
-        _path, target = self.aim_path()
-        label = self.aim_label()
+        path, target = self.aim_path()
         self.mode = MODE_PLAYING
-        if target is None:
-            self.msg(f"Your arrow flies {label.lower()} into the dark.", "warn")
+        if not path:
+            adjacent = self._obstacle_at(
+                self.player.x + self.aim_dx,
+                self.player.y + self.aim_dy,
+            )
+            self.msg(self._miss_message(adjacent), "warn")
             self._wear_equipment(weapon, 1)
             self.player_acted()
             return True
-        self._shoot_target(target, weapon)
+        if not self.animations:
+            if target is None:
+                obstacle = self._shot_obstacle(path)
+                self.msg(self._miss_message(obstacle), "warn")
+                self._wear_equipment(weapon, 1)
+            else:
+                self._shoot_target(target, weapon)
+            self.player_acted()
+            return True
+        px, py = self.player.x, self.player.y
+        flight = self._flight_time(len(path))
+        obstacle = self._shot_obstacle(path)
+        obstacle_cell = (
+            (path[-1][0] + self.aim_dx, path[-1][1] + self.aim_dy)
+            if obstacle is not None
+            else None
+        )
+        self.add_effect(
+            "shot",
+            path[-1][0],
+            path[-1][1],
+            COLOR_FX_ARROW,
+            duration=flight,
+            path=((px, py), *path),
+            glyph=self._shot_glyph(self.aim_dx, self.aim_dy),
+        )
+        self.pending_shot = PendingShot(
+            target=target,
+            weapon=weapon,
+            impact=path[-1],
+            obstacle=obstacle,
+            obstacle_cell=obstacle_cell,
+        )
+        self.pending_turn_at = time.monotonic() + flight
+        return True
+
+    def resolve_pending_turn(self) -> bool:
+        """Разрешить выстрел, когда стрела долетела до цели."""
+        pending = self.pending_shot
+        if pending is None:
+            return False
+        self.pending_shot = None
+        self.pending_turn_at = None
+        if self.game_over or self.player is None:
+            return False
+        if pending.target is not None and pending.target in self.enemies:
+            self._shoot_target(pending.target, pending.weapon)
+        else:
+            self._wear_equipment(pending.weapon, 1)
+            self.add_effect(
+                "spark",
+                pending.impact[0],
+                pending.impact[1],
+                COLOR_FX_ARROW,
+                duration=0.3,
+            )
+            if pending.obstacle == "wall" and pending.obstacle_cell:
+                self.add_effect(
+                    "flash",
+                    pending.obstacle_cell[0],
+                    pending.obstacle_cell[1],
+                    COLOR_FX_ARROW,
+                    duration=0.2,
+                )
+            self.msg(self._miss_message(pending.obstacle), "warn")
         self.player_acted()
         return True
 
@@ -2149,6 +2326,13 @@ class Game:
         target.hp -= dmg
         self.damage_dealt += min(dmg, max(0, before))
         self.add_effect("flash", target.x, target.y, COLOR_FX_HIT)
+        self.add_effect(
+            "spark",
+            target.x,
+            target.y,
+            COLOR_FX_ARROW,
+            duration=0.3,
+        )
         self.add_effect(
             "number",
             target.x,
@@ -2191,12 +2375,17 @@ class Game:
             ),
         )
 
-    def _kill_enemy(self, enemy: Entity) -> None:
+    def _kill_enemy(self, enemy: Entity, delay: float = 0.0) -> None:
         if enemy not in self.enemies:
             return
         self.enemies.remove(enemy)
         self.add_effect(
-            "spark", enemy.x, enemy.y, enemy.color, duration=0.5
+            "spark",
+            enemy.x,
+            enemy.y,
+            enemy.color,
+            duration=0.5,
+            delay=delay,
         )
         self.kills += 1
         self.player_xp += enemy.xp
@@ -2621,15 +2810,27 @@ class Game:
     def cast_fire(self, radius: int, damage: int) -> int:
         hits = 0
         px, py = self.player.x, self.player.y
+        self.add_effect(
+            "burst",
+            px,
+            py,
+            COLOR_FX_FIRE,
+            duration=BURST_DURATION,
+            radius=radius,
+        )
         for e in self.enemies[:]:
-            if max(abs(e.x - px), abs(e.y - py)) > radius:
+            distance = max(abs(e.x - px), abs(e.y - py))
+            if distance > radius:
                 continue
             if not self.is_visible(e.x, e.y):
                 continue
+            delay = BURST_STAGGER * distance
             before = e.hp
             e.hp -= damage
             self.damage_dealt += min(damage, max(0, before))
-            self.add_effect("flash", e.x, e.y, COLOR_FX_FIRE)
+            self.add_effect(
+                "flash", e.x, e.y, COLOR_FX_FIRE, delay=delay
+            )
             self.add_effect(
                 "number",
                 e.x,
@@ -2637,11 +2838,12 @@ class Game:
                 COLOR_FX_FIRE,
                 f"-{damage}",
                 duration=0.55,
+                delay=delay,
             )
             hits += 1
             self.msg(f"Fire burns {e.name} for {damage}.", "warn")
             if not e.alive():
-                self._kill_enemy(e)
+                self._kill_enemy(e, delay=delay)
         return hits
 
     def cast_lightning(self, damage: int) -> str | None:
@@ -2655,10 +2857,29 @@ class Game:
                 e.hp,
             ),
         )
+        px, py = self.player.x, self.player.y
+        distance = max(abs(target.x - px), abs(target.y - py))
+        delay = min(BOLT_DURATION * 0.55, 0.03 * distance)
+        self.add_effect(
+            "bolt",
+            target.x,
+            target.y,
+            COLOR_FX_LIGHTNING,
+            duration=BOLT_DURATION,
+            delay=delay,
+            path=tuple(self._line_path(px, py, target.x, target.y)),
+            glyph=self._shot_glyph(target.x - px, target.y - py),
+        )
         before = target.hp
         target.hp -= damage
         self.damage_dealt += min(damage, max(0, before))
-        self.add_effect("flash", target.x, target.y, COLOR_FX_LIGHTNING)
+        self.add_effect(
+            "flash",
+            target.x,
+            target.y,
+            COLOR_FX_LIGHTNING,
+            delay=delay,
+        )
         self.add_effect(
             "number",
             target.x,
@@ -2666,10 +2887,11 @@ class Game:
             COLOR_FX_LIGHTNING,
             f"-{damage}",
             duration=0.55,
+            delay=delay,
         )
         self.msg(f"Lightning strikes {target.name} for {damage}!", "warn")
         if not target.alive():
-            self._kill_enemy(target)
+            self._kill_enemy(target, delay=delay)
         return target.name
 
     def _path_cost(self) -> np.ndarray:

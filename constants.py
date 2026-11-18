@@ -150,6 +150,15 @@ ARMOR_WEAR_PER_HIT = 2
 # Дальний бой: лук бьёт по ближайшему видимому врагу в этом радиусе.
 PLAYER_RANGED_RANGE = 6
 
+# Полёт снарядов: время на клетку и пределы, чтобы короткий выстрел был
+# заметен, а длинный не задерживал ход. Огонь и молния вспыхивают быстрее.
+PROJECTILE_STEP_TIME = 0.055
+PROJECTILE_MIN_TIME = 0.12
+PROJECTILE_MAX_TIME = 0.42
+BOLT_DURATION = 0.26
+BURST_DURATION = 0.45
+BURST_STAGGER = 0.035
+
 # Прицеливание: маркеры луча и выбранной цели.
 AIM_PATH_CHAR = "·"
 AIM_TARGET_CHAR = "X"
@@ -315,6 +324,7 @@ COLOR_FX_DAMAGE = (255, 120, 95)
 COLOR_FX_HEAL = (140, 255, 165)
 COLOR_FX_FIRE = (255, 150, 60)
 COLOR_FX_LIGHTNING = (175, 220, 255)
+COLOR_FX_ARROW = (245, 222, 160)
 COLOR_VAULT_FLOOR = (108, 98, 70)
 COLOR_GUARDED_FLOOR = (104, 72, 72)
 COLOR_CAMP_FLOOR = (78, 104, 82)

@@ -890,6 +890,180 @@ def _number_spot(
     return attempt(False) or attempt(True)
 
 
+def _fx_put(
+    console: tcod.console.Console,
+    game: Game,
+    left: int,
+    top: int,
+    wx: int,
+    wy: int,
+    glyph: str,
+    color: tuple[int, int, int],
+    bg_mix: float = 0.0,
+    require_visible: bool = False,
+) -> None:
+    """Нарисовать эффект на полу, не задевая стены и HUD."""
+    if not glyph or not _fx_floor(game, wx, wy):
+        return
+    if require_visible and not game.is_visible(wx, wy):
+        return
+    sx = wx - left
+    sy = MAP_Y + wy - top
+    if not (0 <= sx < console.width):
+        return
+    if not (MAP_Y <= sy < min(console.height, MAP_Y + game.view_height())):
+        return
+    if bg_mix > 0.0:
+        cell = _graphic_index(console, sx, sy)
+        console.bg[cell] = _mix(console.bg[cell], color, bg_mix)
+    console.print(sx, sy, glyph, fg=color)
+
+
+def _direction_glyph(dx: int, dy: int) -> str:
+    """Символ линии по направлению шага."""
+    if dx and dy:
+        return "/" if dx * dy < 0 else "\\"
+    return "-" if dx else "|"
+
+
+def _render_shot(
+    console: tcod.console.Console,
+    game: Game,
+    effect: Effect,
+    progress: float,
+    left: int,
+    top: int,
+    blocked: set[tuple[int, int]],
+) -> None:
+    """Стрела летит по клеткам и тает хвостом позади."""
+    path = effect.path
+    if not path:
+        return
+    last = len(path) - 1
+    head = min(last, int(progress * last + 0.5))
+    # На клетке героя или врага стрелу не рисуем: спрайт важнее.
+    # Тогда голова останавливается на соседней клетке, будто вот-вот попадёт.
+    while head > 0 and path[head] in blocked:
+        head -= 1
+    for back in (2, 1, 0):
+        index = head - back
+        if index < 0:
+            continue
+        wx, wy = path[index]
+        if (wx, wy) in blocked:
+            continue
+        if back == 0:
+            _fx_put(
+                console,
+                game,
+                left,
+                top,
+                wx,
+                wy,
+                effect.glyph or "·",
+                effect.color,
+                bg_mix=0.18,
+            )
+        else:
+            fade = 0.55 if back == 1 else 0.3
+            _fx_put(
+                console,
+                game,
+                left,
+                top,
+                wx,
+                wy,
+                "·",
+                _tint(effect.color, fade),
+            )
+
+
+def _render_burst(
+    console: tcod.console.Console,
+    game: Game,
+    effect: Effect,
+    progress: float,
+    left: int,
+    top: int,
+    blocked: set[tuple[int, int]],
+) -> None:
+    """Огненная волна расходится от героя к краю радиуса."""
+    radius = effect.radius
+    if radius <= 0:
+        return
+    wave = progress * (radius + 0.7)
+    fade = max(0.15, 1.0 - progress * 0.85)
+    for wy in range(effect.y - radius, effect.y + radius + 1):
+        for wx in range(effect.x - radius, effect.x + radius + 1):
+            distance = max(abs(wx - effect.x), abs(wy - effect.y))
+            if distance == 0 or distance > radius:
+                continue
+            if (wx, wy) in blocked:
+                continue
+            if distance > wave + 0.5:
+                continue
+            heat = max(0.25, 1.0 - abs(wave - distance) / 1.4)
+            glyph = "*" if heat > 0.55 else ("·" if (wx + wy) % 2 else "~")
+            color = _tint(effect.color, fade * (0.55 + heat * 0.45))
+            _fx_put(
+                console,
+                game,
+                left,
+                top,
+                wx,
+                wy,
+                glyph,
+                color,
+                bg_mix=0.14 * heat,
+                require_visible=True,
+            )
+
+
+def _render_bolt(
+    console: tcod.console.Console,
+    game: Game,
+    effect: Effect,
+    progress: float,
+    left: int,
+    top: int,
+    blocked: set[tuple[int, int]],
+) -> None:
+    """Росчерк молнии по прямой между героем и целью."""
+    path = effect.path
+    if not path:
+        return
+    fade = max(0.15, 1.0 - progress)
+    for index, (wx, wy) in enumerate(path):
+        if (wx, wy) in blocked:
+            continue
+        if index + 1 < len(path):
+            dx = path[index + 1][0] - wx
+            dy = path[index + 1][1] - wy
+        elif index > 0:
+            dx = wx - path[index - 1][0]
+            dy = wy - path[index - 1][1]
+        else:
+            dx, dy = 0, 0
+        if dx == 0 and dy == 0:
+            glyph = effect.glyph or "|"
+        else:
+            glyph = _direction_glyph(dx, dy)
+        if index % 3 == 2 and len(path) > 3:
+            glyph = "*"
+        _fx_put(
+            console,
+            game,
+            left,
+            top,
+            wx,
+            wy,
+            glyph,
+            _tint(effect.color, fade),
+            bg_mix=0.16 * fade,
+            require_visible=True,
+        )
+
+
 def _render_effects(
     console: tcod.console.Console,
     game: Game,
@@ -915,14 +1089,28 @@ def _render_effects(
     def screen_cell(wx: int, wy: int) -> bool:
         return on_map(wx - left, MAP_Y + wy - top)
 
-    # Порядок отрисовки: сначала фон, потом искры, числа поверх них.
-    order = {"fade": 0, "flash": 1, "spark": 2, "number": 3}
+    # Порядок отрисовки: фон, волна, вспышки, искры, снаряды, числа.
+    order = {
+        "fade": 0,
+        "burst": 1,
+        "flash": 2,
+        "spark": 3,
+        "bolt": 4,
+        "shot": 5,
+        "number": 6,
+    }
     for effect in sorted(
-        game.effects, key=lambda item: order.get(item.kind, 4)
+        game.effects, key=lambda item: order.get(item.kind, 7)
     ):
+        elapsed = now - effect.start
+        if elapsed < effect.delay:
+            continue
         progress = min(
             1.0,
-            max(0.0, (now - effect.start) / max(effect.duration, 1e-6)),
+            max(
+                0.0,
+                (elapsed - effect.delay) / max(effect.duration, 1e-6),
+            ),
         )
         if effect.kind == "fade":
             # Спуск: новый этаж проявляется из темноты.
@@ -933,6 +1121,21 @@ def _render_effects(
             console.bg[:] = (
                 console.bg.astype(np.float32) * factor
             ).astype(np.uint8)
+            continue
+        if effect.kind == "burst":
+            _render_burst(
+                console, game, effect, progress, left, top, blocked
+            )
+            continue
+        if effect.kind == "shot":
+            _render_shot(
+                console, game, effect, progress, left, top, blocked
+            )
+            continue
+        if effect.kind == "bolt":
+            _render_bolt(
+                console, game, effect, progress, left, top, blocked
+            )
             continue
 
         sx = effect.x - left
@@ -968,10 +1171,7 @@ def _render_effects(
                 if not on_map(px, py):
                     continue
                 cell = (px + left, py - MAP_Y + top)
-                if game.player is not None and cell == (
-                    game.player.x,
-                    game.player.y,
-                ):
+                if cell in blocked:
                     continue
                 if not _fx_floor(game, *cell):
                     continue

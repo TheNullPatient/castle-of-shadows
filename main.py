@@ -518,6 +518,9 @@ def _repeat_event(sym: KeySym) -> types.SimpleNamespace:
 
 def handle_key(game: Game, event: tcod.event.KeyDown) -> bool:
     """Обработать клавишу. True — закрыть окно."""
+    # Пока стрела летит, ввод ждёт: иначе можно сходить дважды до попадания.
+    if game.pending_turn_at is not None:
+        return False
     if game.mode == MODE_MENU:
         return _handle_menu(game, event)
     if game.mode == MODE_SLOTS:
@@ -1133,6 +1136,13 @@ def main() -> None:
                     if timeout is None
                     else min(timeout, RESIZE_SETTLE_SECONDS)
                 )
+            # Стрела летит: разбудить цикл ровно к моменту попадания,
+            # даже если эффекты к этому кадру уже погасли.
+            if game.pending_turn_at is not None:
+                remaining = max(0.0, game.pending_turn_at - now)
+                timeout = (
+                    remaining if timeout is None else min(timeout, remaining)
+                )
             # Пока живут вспышки, перерисовываем чаще, чтобы они успели
             # проиграться, а не появились одним кадром.
             if game.effects:
@@ -1159,6 +1169,11 @@ def main() -> None:
                     repeat.release(event.sym, now)
                 elif isinstance(event, tcod.event.TextInput):
                     handle_text(game, event.text)
+            if (
+                game.pending_turn_at is not None
+                and now >= game.pending_turn_at
+            ):
+                game.resolve_pending_turn()
             text_input = _sync_text_input(context, game, text_input)
             if settling and not resized:
                 settling = False
