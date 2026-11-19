@@ -15,6 +15,10 @@ TILE_H = 20
 KEY_REPEAT_DELAY = 0.30
 KEY_REPEAT_INTERVAL = 0.12
 
+# Анимации в покое: пока они включены, карта перерисовывается несколько раз
+# в секунду, чтобы факелы мерцали, а свет вокруг героя «дышал».
+AMBIENT_FPS = 20
+
 # Видимая область карты (один «экран») и размер самого этажа. Этаж больше
 # экрана: камера следует за игроком, а FOV и сохранения работают в мировых
 # координатах.
@@ -87,14 +91,15 @@ SETTING_GROUPS = {
     SETTING_ANIMATIONS: "Effects",
 }
 
-# Анимации событий: вспышки, числа, искры и проявление этажа при спуске.
+# Анимации: вспышки, числа, искры, проявление этажа при спуске и живой
+# свет — мерцание факелов с пульсом ореола вокруг героя.
 ANIMATION_ON = "on"
 ANIMATION_OFF = "off"
 ANIMATION_ORDER = (ANIMATION_ON, ANIMATION_OFF)
 ANIMATIONS = {
     ANIMATION_ON: {
         "label": "On",
-        "note": "flashes, numbers, sparks",
+        "note": "flashes, sparks, living light",
     },
     ANIMATION_OFF: {
         "label": "Off",

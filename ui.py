@@ -154,16 +154,19 @@ def _mix(
     )  # type: ignore[return-value]
 
 
-def _light(game: Game, x: int, y: int) -> float:
+def _light(game: Game, x: int, y: int, pulse: float = 1.0) -> float:
     """Мягкое затухание света от игрока внутри FOV."""
     distance = math.hypot(x - game.player.x, y - game.player.y)
-    return max(0.58, 1.0 - distance / (FOV_RADIUS + 2.0) * 0.42)
+    base = max(0.58, 1.0 - distance / (FOV_RADIUS + 2.0) * 0.42)
+    return max(0.54, min(1.08, base * pulse))
 
 
-def _warm_glow(game: Game, x: int, y: int) -> tuple[int, int, int]:
+def _warm_glow(
+    game: Game, x: int, y: int, pulse: float = 1.0
+) -> tuple[int, int, int]:
     """Тёплый ореол вокруг игрока, чтобы карта не была плоской."""
     distance = math.hypot(x - game.player.x, y - game.player.y)
-    strength = max(0.0, 1.0 - distance / (FOV_RADIUS * 0.9))
+    strength = max(0.0, 1.0 - distance / (FOV_RADIUS * 0.9)) * pulse
     return int(12 * strength), int(8 * strength), int(3 * strength)
 
 
@@ -221,12 +224,21 @@ def _torch_at(x: int, y: int, depth: int) -> bool:
 
 
 def _torches_in_view(
-    game: Game, left: int, top: int, view_w: int, view_h: int
+    game: Game,
+    left: int,
+    top: int,
+    view_w: int,
+    view_h: int,
+    now: float,
 ) -> list[tuple[int, int, float]]:
-    """Факелы рядом с экраном и их мягкое «дыхание» по номеру хода."""
+    """Факелы рядом с экраном и их живое мерцание по времени.
+
+    ``now`` — общие часы анимации: при выключенных эффектах передаётся 0,
+    поэтому факелы остаются статичными, но всё равно светятся по-разному.
+    """
     grid = game.dungeon.grid
     margin = int(_TORCH_RADIUS) + 1
-    phase_t = game.turns * 0.9
+    phase_t = now * 1.7
     torches: list[tuple[int, int, float]] = []
     for wy in range(
         max(0, top - margin), min(game.dungeon.h, top + view_h + margin)
@@ -241,7 +253,9 @@ def _torches_in_view(
             if not _torch_at(wx, wy, game.depth):
                 continue
             phase = (wx * 12.9898 + wy * 78.233 + game.depth * 37.719) % math.tau
-            flicker = 0.82 + 0.18 * (0.5 + 0.5 * math.sin(phase_t + phase))
+            wave = 0.5 + 0.5 * math.sin(phase_t + phase)
+            wave2 = 0.5 + 0.5 * math.sin(phase_t * 2.3 + phase * 1.7)
+            flicker = 0.74 + 0.18 * wave + 0.08 * wave2
             torches.append((wx, wy, flicker))
     return torches
 
@@ -461,8 +475,16 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
     biome = biome_index(game.depth)
     wall_color, floor_color = BIOME_COLORS[biome]
     relief = game.map_style != MAP_STYLE_CLASSIC
+    ambient = time.monotonic() if game.animations else 0.0
+    pulse = (
+        1.0 + 0.04 * math.sin(ambient * 1.35 + game.depth * 0.6)
+        if game.animations
+        else 1.0
+    )
     if relief:
-        torches = _torches_in_view(game, left, top, view_w, view_h)
+        torches = _torches_in_view(
+            game, left, top, view_w, view_h, ambient
+        )
         torch_here = {(tx, ty): flicker for tx, ty, flicker in torches}
         lit = [torch for torch in torches if game.is_visible(torch[0], torch[1])]
         glow = _torch_light(lit, grid, left, top, view_w, view_h)
@@ -486,8 +508,8 @@ def _render_map(console: tcod.console.Console, game: Game) -> None:
             room = game.special_room_at(wx, wy)
             special = _special_floor_color(room)
             if visible:
-                light = _light(game, wx, wy)
-                bg = _warm_glow(game, wx, wy)
+                light = _light(game, wx, wy, pulse)
+                bg = _warm_glow(game, wx, wy, pulse)
                 glow_r = glow_g = glow_b = 0.0
                 if glow is not None:
                     glow_r, glow_g, glow_b = glow[sy][sx]
@@ -1064,6 +1086,49 @@ def _render_bolt(
         )
 
 
+def _render_descent(
+    console: tcod.console.Console,
+    game: Game,
+    progress: float,
+    left: int,
+    top: int,
+) -> None:
+    """Спуск: свет разливается от героя, а не проявляет экран целиком."""
+    view_w = min(game.view_width(), console.width)
+    view_h = min(game.view_height(), console.height - MAP_Y)
+    if view_w <= 0 or view_h <= 0:
+        return
+    # Волна должна успеть пройти весь радиус обзора за время эффекта:
+    # только его и видно на новом этаже, остальное ещё не исследовано.
+    max_radius = FOV_RADIUS + 3.0
+    radius = 3.0 + (progress ** 1.35) * max_radius
+    if game.player is not None:
+        center_x = game.player.x - left
+        center_y = game.player.y - top
+    else:
+        center_x = view_w / 2.0
+        center_y = view_h / 2.0
+    xs = np.arange(view_w, dtype=np.float32)[:, None]
+    ys = np.arange(view_h, dtype=np.float32)[None, :]
+    distance = np.hypot(xs - center_x, ys - center_y)
+    weights = np.clip((radius - distance) / 2.0, 0.0, 1.0)
+    fg = console.fg
+    bg = console.bg
+    if fg.shape[0] == console.width and fg.shape[1] == console.height:
+        region_fg = fg[:view_w, MAP_Y : MAP_Y + view_h]
+        region_bg = bg[:view_w, MAP_Y : MAP_Y + view_h]
+    else:
+        region_fg = fg[MAP_Y : MAP_Y + view_h, :view_w]
+        region_bg = bg[MAP_Y : MAP_Y + view_h, :view_w]
+        weights = weights.T
+    region_fg[:] = (
+        region_fg.astype(np.float32) * weights[:, :, None]
+    ).astype(np.uint8)
+    region_bg[:] = (
+        region_bg.astype(np.float32) * weights[:, :, None]
+    ).astype(np.uint8)
+
+
 def _render_effects(
     console: tcod.console.Console,
     game: Game,
@@ -1113,14 +1178,8 @@ def _render_effects(
             ),
         )
         if effect.kind == "fade":
-            # Спуск: новый этаж проявляется из темноты.
-            factor = progress
-            console.fg[:] = (
-                console.fg.astype(np.float32) * factor
-            ).astype(np.uint8)
-            console.bg[:] = (
-                console.bg.astype(np.float32) * factor
-            ).astype(np.uint8)
+            # Спуск: новый этаж проявляется из темноты волной от героя.
+            _render_descent(console, game, progress, left, top)
             continue
         if effect.kind == "burst":
             _render_burst(

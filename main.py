@@ -13,6 +13,7 @@ import tcod.event
 from tcod.event import KeySym
 
 from constants import (
+    AMBIENT_FPS,
     AUTO_DISPLAY_MODE,
     KEY_REPEAT_DELAY,
     KEY_REPEAT_INTERVAL,
@@ -1147,6 +1148,11 @@ def main() -> None:
             # проиграться, а не появились одним кадром.
             if game.effects:
                 frame = 1.0 / 60.0
+                timeout = frame if timeout is None else min(timeout, frame)
+            # В покое карта всё равно «дышит»: факелы мерцают, а ореол
+            # вокруг героя пульсирует. Без анимаций лишних кадров нет.
+            elif game.animations and game.mode == MODE_PLAYING:
+                frame = 1.0 / AMBIENT_FPS
                 timeout = frame if timeout is None else min(timeout, frame)
             events = list(tcod.event.wait(timeout))
             now = time.monotonic()
