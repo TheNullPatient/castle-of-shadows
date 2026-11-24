@@ -99,7 +99,7 @@ ANIMATION_ORDER = (ANIMATION_ON, ANIMATION_OFF)
 ANIMATIONS = {
     ANIMATION_ON: {
         "label": "On",
-        "note": "flashes, sparks, living light",
+        "note": "flashes, tracers, living light",
     },
     ANIMATION_OFF: {
         "label": "Off",
@@ -330,6 +330,8 @@ COLOR_FX_HEAL = (140, 255, 165)
 COLOR_FX_FIRE = (255, 150, 60)
 COLOR_FX_LIGHTNING = (175, 220, 255)
 COLOR_FX_ARROW = (245, 222, 160)
+COLOR_FX_ENEMY_SHOT = (255, 118, 92)
+COLOR_FX_DART = (205, 215, 230)
 COLOR_VAULT_FLOOR = (108, 98, 70)
 COLOR_GUARDED_FLOOR = (104, 72, 72)
 COLOR_CAMP_FLOOR = (78, 104, 82)

@@ -1145,11 +1145,24 @@ def _render_effects(
     def on_map(x: int, y: int) -> bool:
         return 0 <= x < width and map_top <= y < map_bottom
 
-    # Числа не должны закрывать героя, врагов и друг друга.
+    # Эффекты не затирают героя, врагов и объекты на карте: их спрайты
+    # важнее короткой вспышки или пролетающей стрелы.
     blocked: set[tuple[int, int]] = set()
     if game.player is not None:
         blocked.add((game.player.x, game.player.y))
     blocked.update((enemy.x, enemy.y) for enemy in game.enemies)
+    blocked.update((chest.x, chest.y) for chest in game.chests)
+    blocked.update(
+        pos
+        for pos in (
+            game.spawn,
+            game.stairs,
+            game.merchant_pos,
+            game.altar_pos,
+            game.trash_pos,
+        )
+        if pos is not None
+    )
 
     def screen_cell(wx: int, wy: int) -> bool:
         return on_map(wx - left, MAP_Y + wy - top)
@@ -1162,6 +1175,7 @@ def _render_effects(
         "spark": 3,
         "bolt": 4,
         "shot": 5,
+        "enemy_shot": 5,
         "number": 6,
     }
     for effect in sorted(
@@ -1186,7 +1200,7 @@ def _render_effects(
                 console, game, effect, progress, left, top, blocked
             )
             continue
-        if effect.kind == "shot":
+        if effect.kind in ("shot", "enemy_shot"):
             _render_shot(
                 console, game, effect, progress, left, top, blocked
             )

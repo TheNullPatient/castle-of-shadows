@@ -33,6 +33,8 @@ from constants import (
     COLOR_ENEMY,
     COLOR_FX_ARROW,
     COLOR_FX_DAMAGE,
+    COLOR_FX_DART,
+    COLOR_FX_ENEMY_SHOT,
     COLOR_FX_FIRE,
     COLOR_FX_HEAL,
     COLOR_FX_HIT,
@@ -1287,7 +1289,13 @@ class Game:
                 + self.depth // TRAP_DART_DAMAGE_PER_DEPTH
             )
             self.msg(f"A dart trap fires at you for {dmg}!", "warn")
-            self._hurt_player(dmg, "a dart trap", wear_armor=False)
+            delay = self._dart_tracer()
+            self._hurt_player(
+                dmg,
+                "a dart trap",
+                wear_armor=False,
+                effect_delay=delay,
+            )
         elif trap.kind == "poison":
             turns = (
                 TRAP_POISON_TURNS_BASE
@@ -1745,7 +1753,13 @@ class Game:
         if random.random() < 0.5:
             dmg = random.randint(1, 3 + self.depth // 3)
             self.msg(f"A dart trap hits you for {dmg}.", "warn")
-            self._hurt_player(dmg, "a chest trap", wear_armor=False)
+            delay = self._dart_tracer()
+            self._hurt_player(
+                dmg,
+                "a chest trap",
+                wear_armor=False,
+                effect_delay=delay,
+            )
             return
         turns = 4 + self.depth // 4
         self.poison_turns = max(self.poison_turns, turns)
@@ -2011,6 +2025,48 @@ class Game:
                 if now - effect.start < effect.delay + effect.duration
             ]
         return bool(self.effects)
+
+    def _tracer(
+        self,
+        path: list[tuple[int, int]],
+        color: tuple[int, int, int],
+    ) -> float:
+        """Показать полёт вражеского снаряда и вернуть время полёта.
+
+        Урон уже разрешён мгновенно; задержка нужна лишь вспышке и числу,
+        чтобы они появились, когда росчерк достигнет героя.
+        """
+        if not self.animations or len(path) < 2:
+            return 0.0
+        dx = path[1][0] - path[0][0]
+        dy = path[1][1] - path[0][1]
+        flight = self._flight_time(len(path))
+        self.add_effect(
+            "enemy_shot",
+            path[-1][0],
+            path[-1][1],
+            color,
+            duration=flight,
+            path=tuple(path),
+            glyph=self._shot_glyph(dx, dy),
+        )
+        return flight
+
+    def _dart_tracer(self) -> float:
+        """Дротик из стены рядом с героем: ловушка в полу или в сундуке."""
+        if not self.animations or self.player is None:
+            return 0.0
+        px, py = self.player.x, self.player.y
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ax, ay = px + dx, py + dy
+            if not self.walkable(ax, ay) or self._occupied(ax, ay):
+                continue
+            bx, by = px + dx * 2, py + dy * 2
+            path = [(ax, ay), (px, py)]
+            if self.walkable(bx, by) and not self._occupied(bx, by):
+                path.insert(0, (bx, by))
+            return self._tracer(path, COLOR_FX_DART)
+        return 0.0
 
     def attack(self, attacker: Entity, defender: Entity) -> None:
         if attacker is self.player:
@@ -2424,13 +2480,20 @@ class Game:
         source: str,
         wear_armor: bool = True,
         attacker: Entity | None = None,
+        effect_delay: float = 0.0,
     ) -> None:
         if self.game_over:
             return
         before = self.player.hp
         self.player.hp -= dmg
         self.damage_taken += min(dmg, max(0, before))
-        self.add_effect("flash", self.player.x, self.player.y, COLOR_FX_HURT)
+        self.add_effect(
+            "flash",
+            self.player.x,
+            self.player.y,
+            COLOR_FX_HURT,
+            delay=effect_delay,
+        )
         self.add_effect(
             "number",
             self.player.x,
@@ -2438,6 +2501,7 @@ class Game:
             COLOR_FX_DAMAGE,
             f"-{dmg}",
             duration=0.55,
+            delay=effect_delay,
         )
         if wear_armor:
             amount = ARMOR_WEAR_PER_HIT
@@ -2929,8 +2993,14 @@ class Game:
             1,
             enemy.atk - self.total_df + random.randint(-1, 2),
         )
+        path = self._line_path(
+            enemy.x, enemy.y, self.player.x, self.player.y
+        )
+        delay = self._tracer(path, COLOR_FX_ENEMY_SHOT)
         self.msg(f"{enemy.name} shoots you for {dmg}.", "enemy")
-        self._hurt_player(dmg, enemy.name, attacker=enemy)
+        self._hurt_player(
+            dmg, enemy.name, attacker=enemy, effect_delay=delay
+        )
 
     def _summon(self, enemy: Entity) -> None:
         limit = MAX_ENEMIES + len(self.dungeon.rooms) // 3
